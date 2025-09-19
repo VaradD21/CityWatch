@@ -1,0 +1,266 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model City {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  alerts    Alert[]
+  events    Event[]
+  reports   Report[]
+  users     User[]
+
+  @@map("cities")
+}
+
+model User {
+  id                 String               @id @default(uuid())
+  username           String               @unique
+  email              String               @unique
+  password           String
+  firstName          String?
+  middleName         String?
+  lastName           String?
+  dob                DateTime?
+  mobile             String?
+  agreedTos          Boolean              @default(false)
+  isVerified         Boolean              @default(false)
+  otpCode            String?
+  otpExpires         DateTime?
+  role               Role                 @default(citizen)
+  cityId             String?
+  isBanned           Boolean              @default(false)
+  profilePicture     String?
+  bio                String?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  alerts             Alert[]
+  auditLogsPerformed AuditLog[]           @relation("AuditLogPerformedBy")
+  auditLogs          AuditLog[]
+  authorityUpdates   AuthorityUpdate[]
+  comments           Comment[]
+  events             Event[]
+  notifications      Notification[]
+  priorityVotes      ReportPriorityVote[]
+  reports            Report[]
+  city               City?                @relation(fields: [cityId], references: [id])
+
+  @@index([role])
+  @@index([cityId])
+  @@index([isBanned])
+  @@index([createdAt])
+  @@map("users")
+}
+
+model Report {
+  id               String               @id @default(uuid())
+  title            String
+  description      String
+  category         Category
+  status           Status               @default(OPEN)
+  cityId           String
+  authorId         String
+  deleted          Boolean              @default(false)
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  latitude         Float?
+  longitude        Float?
+  priorityCount    Int                  @default(0)
+  attachments      Attachment[]
+  authorityUpdates AuthorityUpdate[]
+  comments         Comment[]
+  embedding        ReportEmbedding?
+  priorityVotes    ReportPriorityVote[]
+  author           User                 @relation(fields: [authorId], references: [id])
+  city             City                 @relation(fields: [cityId], references: [id])
+
+  @@index([cityId])
+  @@index([status])
+  @@index([deleted])
+  @@index([createdAt])
+  @@index([authorId])
+  @@index([category])
+  @@index([latitude, longitude])
+  @@index([priorityCount])
+  @@index([priorityCount, createdAt]) // Composite index for sorting
+  @@index([status, cityId, createdAt]) // Composite index for filtering
+  @@index([cityId, category, status]) // Composite index for category filtering
+  @@map("reports")
+}
+
+model AuthorityUpdate {
+  id               String   @id @default(uuid())
+  reportId         String
+  authorityId      String
+  text             String
+  newStatus        Status?
+  createdAt        DateTime @default(now())
+  resolutionImages String?
+  authority        User     @relation(fields: [authorityId], references: [id])
+  report           Report   @relation(fields: [reportId], references: [id])
+
+  @@map("authority_updates")
+}
+
+model AuditLog {
+  id            String   @id @default(uuid())
+  actorId       String
+  actorRole     Role
+  action        String
+  actionType    String
+  targetType    String
+  targetId      String
+  performedById String
+  reason        String?
+  metadata      Json?
+  createdAt     DateTime @default(now())
+  performedBy   User     @relation("AuditLogPerformedBy", fields: [performedById], references: [id])
+  actor         User     @relation(fields: [actorId], references: [id])
+
+  @@map("audit_logs")
+}
+
+model Comment {
+  id        String   @id @default(uuid())
+  content   String
+  reportId  String
+  authorId  String
+  createdAt DateTime @default(now())
+  report    Report   @relation(fields: [reportId], references: [id])
+  author    User     @relation(fields: [authorId], references: [id])
+
+  @@index([reportId])
+  @@index([authorId])
+  @@index([createdAt])
+  @@map("comments")
+}
+
+model Attachment {
+  id        String   @id @default(uuid())
+  filename  String
+  filepath  String
+  mimetype  String
+  size      Int
+  reportId  String
+  createdAt DateTime @default(now())
+  report    Report   @relation(fields: [reportId], references: [id])
+
+  @@map("attachments")
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  type      String
+  message   String
+  link      String?
+  isRead    Boolean  @default(false)
+  reportId  String?
+  alertId   String?
+  createdAt DateTime @default(now())
+  Alert     Alert?   @relation(fields: [alertId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([isRead])
+  @@index([createdAt])
+  @@index([type])
+  @@map("notifications")
+}
+
+model Alert {
+  id            String         @id @default(uuid())
+  title         String
+  message       String
+  cityId        String
+  createdBy     String
+  isPinned      Boolean        @default(false)
+  deleted       Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  creator       User           @relation(fields: [createdBy], references: [id])
+  city          City           @relation(fields: [cityId], references: [id])
+  notifications Notification[]
+
+  @@index([cityId])
+  @@index([createdBy])
+  @@index([isPinned])
+  @@index([deleted])
+  @@index([createdAt])
+  @@map("alerts")
+}
+
+model Event {
+  id          String   @id @default(uuid())
+  title       String
+  description String
+  dateTime    DateTime
+  location    String?
+  imageUrl    String?
+  cityId      String
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  creator     User     @relation(fields: [createdBy], references: [id])
+  city        City     @relation(fields: [cityId], references: [id])
+
+  @@index([cityId])
+  @@index([createdBy])
+  @@index([dateTime])
+  @@index([createdAt])
+  @@map("events")
+}
+
+model ReportEmbedding {
+  id        String   @id @default(uuid())
+  reportId  String   @unique
+  embedding String
+  createdAt DateTime @default(now())
+  report    Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@map("report_embeddings")
+}
+
+model ReportPriorityVote {
+  id        String   @id @default(uuid())
+  reportId  String
+  userId    String
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  report    Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, userId])
+  @@index([reportId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("report_priority_votes")
+}
+
+enum Role {
+  citizen
+  authority
+  admin
+}
+
+enum Category {
+  GARBAGE
+  ROAD
+  WATER
+  POWER
+  OTHER
+}
+
+enum Status {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
