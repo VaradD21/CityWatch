@@ -202,7 +202,7 @@ CityWatch is built with a focus on:
 **Members**:
 - Darshdeep
 - Varad
--  Omkar
+- Omkar
 - Shivam
 - Tanmay
 
@@ -212,14 +212,12 @@ CityWatch is built with a focus on:
 
 This project and its source code are proprietary and confidential. 
 
-**Copyright © 2024 Team Devoted. All rights reserved.**
+**Copyright © 2025 Team Devoted. All rights reserved.**
 
 ### Usage Restrictions
 
 - ❌ **No Commercial Use**: This software may not be used for commercial purposes without explicit written permission
 - ❌ **No Distribution**: You may not distribute, copy, or share this code without authorization
-- ❌ **No Modification**: You may not modify, adapt, or create derivative works without permission
-- ❌ **No Reverse Engineering**: You may not attempt to reverse engineer or decompile this software
 - ❌ **No Public Display**: You may not display this project publicly without consent
 
 ### Permissions
@@ -231,7 +229,7 @@ This project and its source code are proprietary and confidential.
 
 For permissions, licensing inquiries, or collaboration opportunities, please contact varaddigraskar21@gmail.com
 
-**Unauthorized use of this software is strictly prohibited and may result in legal action.**
 
+**Copyright © 2025 Team Devoted. All rights reserved.**
 ---
 
