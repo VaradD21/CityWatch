@@ -1,10 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { useNotifications } from '../contexts/NotificationContext';
+import { Bell } from 'lucide-react';
 
 const NotificationDropdown = () => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
+  const navigate = useNavigate();
   const { notifications, unreadCount, markAsRead, markAllAsRead, navigateToNotification, formatNotificationTime } = useNotifications();
 
   // Close dropdown when clicking outside
@@ -22,7 +24,7 @@ const NotificationDropdown = () => {
   }, []);
 
   const handleNotificationClick = async (notification) => {
-    navigateToNotification(notification);
+    navigateToNotification(notification, navigate);
     setIsOpen(false);
   };
 
@@ -56,6 +58,24 @@ const NotificationDropdown = () => {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
           </svg>
         );
+      case 'ALERT':
+        return (
+          <svg className="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
+          </svg>
+        );
+      case 'EVENT':
+        return (
+          <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+          </svg>
+        );
+      case 'EVENT_APPROVAL':
+        return (
+          <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+          </svg>
+        );
       default:
         return (
           <svg className="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -71,19 +91,7 @@ const NotificationDropdown = () => {
         onClick={() => setIsOpen(!isOpen)}
         className="relative p-2 text-gray-700 hover:text-blue-600 focus:outline-none focus:text-blue-600 transition-colors"
       >
-        <img 
-          src="http://localhost:5000/assets/icons/bell.png" 
-          alt="Notifications" 
-          className="w-6 h-6"
-          onError={(e) => {
-            // Fallback to SVG if image fails to load
-            e.target.style.display = 'none';
-            e.target.nextSibling.style.display = 'block';
-          }}
-        />
-        <svg className="w-6 h-6 hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 17h5l-5 5v-5zM4 19h6v-2H4v2z" />
-        </svg>
+        <Bell className="w-6 h-6" />
         {unreadCount > 0 && (
           <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full h-5 w-5 flex items-center justify-center">
             {unreadCount > 9 ? '9+' : unreadCount}

@@ -56,11 +56,9 @@ const ERROR_CODES = {
   SERVICE_UNAVAILABLE: 'SERVICE_UNAVAILABLE'
 };
 
-const logger = require('../utils/logger');
-
 // Error handler middleware
 const errorHandler = (err, req, res, next) => {
-  logger.error('Error occurred:', {
+  console.error('Error occurred:', {
     message: err?.message,
     stack: err?.stack,
     url: req?.url,
@@ -70,7 +68,7 @@ const errorHandler = (err, req, res, next) => {
 
   // Check if response object is valid
   if (!res || typeof res.status !== 'function') {
-    logger.error('Invalid response object in error handler');
+    console.error('Invalid response object in error handler');
     return next(err);
   }
 

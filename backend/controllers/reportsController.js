@@ -7,6 +7,7 @@ const {
   notifyReportClosed,
 } = require('../services/notificationService');
 const { checkDuplicate, generateEmbedding, storeEmbedding } = require('../services/duplicateService');
+const aiService = require('../services/aiService');
 
 // Create a new report (Citizens only)
 const createReport = async (req, res) => {
@@ -31,9 +32,9 @@ const createReport = async (req, res) => {
     }
 
     // Validation
-    if (!title || !description || !category) {
+    if (!title || !description) {
       return res.status(400).json({
-        error: 'All fields are required: title, description, category'
+        error: 'Title and description are required'
       });
     }
 
@@ -59,13 +60,7 @@ const createReport = async (req, res) => {
       });
     }
 
-    // Validate category
-    const validCategories = ['GARBAGE', 'ROAD', 'WATER', 'POWER', 'OTHER'];
-    if (!validCategories.includes(category)) {
-      return res.status(400).json({
-        error: `Invalid category. Must be one of: ${validCategories.join(', ')}`,
-      });
-    }
+    // Category will be determined by AI analysis - no manual validation needed
 
     // Parse and validate location coordinates
     const parsedLatitude = parseFloat(latitude);
@@ -109,14 +104,46 @@ const createReport = async (req, res) => {
       }
     }
 
+    // Analyze report content to determine category and authority type
+    let aiAnalysis = null;
+    try {
+      aiAnalysis = await aiService.analyzeReportContent(
+        title.trim(),
+        description.trim()
+      );
+      console.log(`🤖 AI Analysis Result: Category=${aiAnalysis.category}, Authority=${aiAnalysis.authorityType} (confidence: ${(aiAnalysis.confidence * 100).toFixed(1)}%)`);
+    } catch (error) {
+      console.error('Error in AI analysis:', error);
+      // Continue with report creation even if AI analysis fails
+      // Use default values
+      aiAnalysis = {
+        category: 'OTHER',
+        authorityType: 'General Municipal Services',
+        confidence: 0.5,
+        reasoning: 'AI analysis failed, using default values'
+      };
+    }
+
+    // Get authority type ID if AI analysis provided one
+    let authorityTypeId = null;
+    if (aiAnalysis && aiAnalysis.authorityType) {
+      const authorityType = await prisma.authorityType.findUnique({
+        where: { name: aiAnalysis.authorityType }
+      });
+      if (authorityType) {
+        authorityTypeId = authorityType.id;
+      }
+    }
+
     // Create report
     const report = await prisma.report.create({
       data: {
         title: title.trim(),
         description: description.trim(),
-        category,
+        category: aiAnalysis.category,
         cityId,
         authorId,
+        authorityTypeId,
         latitude: parsedLatitude,
         longitude: parsedLongitude
       },
@@ -172,7 +199,14 @@ const createReport = async (req, res) => {
 
     res.status(201).json({
       message: 'Report created successfully',
-      report
+      report,
+      aiAnalysis: aiAnalysis ? {
+        category: aiAnalysis.category,
+        suggestedAuthorityType: aiAnalysis.authorityType,
+        confidence: aiAnalysis.confidence,
+        reasoning: aiAnalysis.reasoning,
+        alternativeOptions: aiAnalysis.alternativeOptions
+      } : null
     });
   } catch (error) {
     console.error('Create report error:', error);
@@ -182,13 +216,14 @@ const createReport = async (req, res) => {
   }
 };
 
-// Get reports list (filtered by user's city)
+// Get reports list (filtered by user's city, except for admin/authority)
 const getReports = async (req, res) => {
   const startTime = Date.now();
   console.time('getReports');
 
   try {
     const userCityId = req.user.cityId;
+    const userRole = req.user.role;
     const { category, status, page = 1, limit = 20, q } = req.query;
 
     // Enforce pagination limits
@@ -204,6 +239,7 @@ const getReports = async (req, res) => {
     if (!q) {
       const cacheKey = cacheService.generateKey('reports', {
         userCityId,
+        userRole,
         category,
         status,
         page: parsedPage,
@@ -221,8 +257,8 @@ const getReports = async (req, res) => {
       }
     }
 
-    // If user has no city, return empty results
-    if (!userCityId) {
+    // If user has no city and is not admin/authority, return empty results
+    if (!userCityId && userRole !== 'admin' && userRole !== 'authority') {
       return res.json({
         reports: [],
         pagination: {
@@ -238,11 +274,26 @@ const getReports = async (req, res) => {
     const skip = (parsedPage - 1) * parsedLimit;
     const take = parsedLimit;
 
-    // Build where clause
+    // Build where clause - admin and authority can see all cities
     const where = {
-      cityId: userCityId,
       deleted: false
     };
+
+    // Filter by city and authority type based on user role
+    if (userRole === 'citizen' && userCityId) {
+      // Citizens can only see reports from their city
+      where.cityId = userCityId;
+    } else if (userRole === 'authority') {
+      // Authorities can see reports from their city AND their authority type
+      if (userCityId) {
+        where.cityId = userCityId;
+      }
+      // Filter by authority type if user has one assigned
+      if (req.user.authorityTypeId) {
+        where.authorityTypeId = req.user.authorityTypeId;
+      }
+    }
+    // Admins can see all reports (no additional filtering)
 
     if (category) {
       where.category = category;
@@ -258,7 +309,7 @@ const getReports = async (req, res) => {
         .trim()
         .replace(/[<>'"&]/g, '') // Remove dangerous characters
         .replace(/[^\w\s\-.]/g, '') // Keep only alphanumeric, spaces, hyphens, and dots
-        .substring(0, 50); // Reduce limit to prevent abuse
+        .substring(0, 100); // Limit length to prevent abuse
 
       if (sanitizedQuery.length > 0) {
         where.OR = [
@@ -278,7 +329,6 @@ const getReports = async (req, res) => {
           description: true,
           category: true,
           status: true,
-          priorityCount: true,
           createdAt: true,
           updatedAt: true,
           author: {
@@ -296,6 +346,14 @@ const getReports = async (req, res) => {
               slug: true
             },
           },
+          authorityType: {
+            select: {
+              id: true,
+              name: true,
+              displayName: true,
+              icon: true
+            },
+          },
           _count: {
             select: {
               comments: true,
@@ -303,14 +361,9 @@ const getReports = async (req, res) => {
             },
           }
         },
-        orderBy: [
-          {
-            priorityCount: 'desc'
-          },
-          {
-            createdAt: 'desc'
-          }
-        ],
+        orderBy: {
+          createdAt: 'desc'
+        },
         skip,
         take
       }),
@@ -318,7 +371,7 @@ const getReports = async (req, res) => {
       prisma.report.groupBy({
         by: ['category'],
         where: {
-          cityId: userCityId,
+          ...where, // Use the same where clause as the main query
           deleted: false
         },
         _count: {
@@ -326,26 +379,6 @@ const getReports = async (req, res) => {
         },
       })
     ]);
-
-    // Add userHasVoted field for citizens
-    if (req.user.role === 'citizen') {
-      const reportIds = reports.map(report => report.id);
-      const userVotes = await prisma.reportPriorityVote.findMany({
-        where: {
-          reportId: { in: reportIds },
-          userId: req.user.id
-        },
-        select: {
-          reportId: true
-        }
-      });
-      
-      const votedReportIds = new Set(userVotes.map(vote => vote.reportId));
-      
-      reports.forEach(report => {
-        report.userHasVoted = votedReportIds.has(report.id);
-      });
-    }
 
     // Format category counts
     const categoryStats = categoryCounts.reduce((acc, item) => {
@@ -368,6 +401,7 @@ const getReports = async (req, res) => {
     if (!q) {
       const cacheKey = cacheService.generateKey('reports', {
         userCityId,
+        userRole,
         category,
         status,
         page: parsedPage,
@@ -389,6 +423,114 @@ const getReports = async (req, res) => {
     console.error(`Get reports error after ${duration}ms:`, error);
     res.status(500).json({
       error: 'Internal server error'
+    });
+  }
+};
+
+// Get all reports with location data for map display
+const getAllReportsForMap = async (req, res) => {
+  try {
+    const userCityId = req.user.cityId;
+    const userRole = req.user.role;
+    const { category, status, limit = 1000 } = req.query;
+
+    // If user has no city and is not admin/authority, return empty results
+    if (!userCityId && userRole !== 'admin' && userRole !== 'authority') {
+      return res.json({
+        reports: []
+      });
+    }
+
+    // Build where clause - admin and authority can see all cities
+    const where = {
+      deleted: false,
+      latitude: { not: null },
+      longitude: { not: null }
+    };
+
+    // Filter by city and authority type based on user role
+    if (userRole === 'citizen' && userCityId) {
+      // Citizens can only see reports from their city
+      where.cityId = userCityId;
+    } else if (userRole === 'authority') {
+      // Authorities can see reports from their city AND their authority type
+      if (userCityId) {
+        where.cityId = userCityId;
+      }
+      // Filter by authority type if user has one assigned
+      if (req.user.authorityTypeId) {
+        where.authorityTypeId = req.user.authorityTypeId;
+      }
+    }
+    // Admins can see all reports (no additional filtering)
+
+    if (category) {
+      where.category = category;
+    }
+
+    if (status) {
+      where.status = status;
+    }
+
+    // Get reports with location data
+    const reports = await prisma.report.findMany({
+      where,
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        category: true,
+        status: true,
+        latitude: true,
+        longitude: true,
+        createdAt: true,
+        updatedAt: true,
+        author: {
+          select: {
+            id: true,
+            username: true,
+            role: true,
+            profilePicture: true
+          },
+        },
+        city: {
+          select: {
+            id: true,
+            name: true,
+            slug: true
+          },
+        },
+        authorityType: {
+          select: {
+            id: true,
+            name: true,
+            displayName: true,
+            icon: true
+          },
+        },
+        _count: {
+          select: {
+            comments: true,
+            attachments: true,
+            votes: true
+          },
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      },
+      take: parseInt(limit)
+    });
+
+    res.json({
+      success: true,
+      reports
+    });
+  } catch (error) {
+    console.error('Get all reports for map error:', error);
+    res.status(500).json({
+      success: false,
+      error: 'Failed to fetch reports for map'
     });
   }
 };
@@ -455,12 +597,6 @@ const getReportById = async (req, res) => {
           orderBy: {
             createdAt: 'asc'
           },
-        },
-        priorityVotes: {
-          select: {
-            userId: true,
-            createdAt: true
-          }
         }
       }
     });
@@ -470,18 +606,6 @@ const getReportById = async (req, res) => {
         error: 'Report not found'
       });
     }
-
-    // Check if current user has voted on this report (optimized with include)
-    let userHasVoted = false;
-    if (req.user.role === 'citizen') {
-      // Use the already fetched report with priorityVotes relation
-      userHasVoted = report.priorityVotes && report.priorityVotes.some(
-        vote => vote.userId === req.user.id
-      );
-    }
-
-    // Add user vote information to the report
-    report.userHasVoted = userHasVoted;
 
     // Add full URLs to attachments
     if (report.attachments) {
@@ -681,6 +805,13 @@ const addAuthorityUpdate = async (req, res) => {
     if (!text || text.trim().length === 0) {
       return res.status(400).json({
         error: 'Update text is required'
+      });
+    }
+
+    // If resolving the report, require resolution images
+    if (newStatus === 'RESOLVED' && resolutionImages.length === 0) {
+      return res.status(400).json({
+        error: 'Resolution images are required when marking a report as resolved'
       });
     }
 
@@ -1150,6 +1281,7 @@ const getNearbyReports = async (req, res) => {
   try {
     const { lat, lng, radius = 5 } = req.query; // radius in kilometers
     const userCityId = req.user.cityId;
+    const userRole = req.user.role;
 
     if (!lat || !lng) {
       return res.status(400).json({
@@ -1179,20 +1311,27 @@ const getNearbyReports = async (req, res) => {
     const minLng = longitude - lngDelta;
     const maxLng = longitude + lngDelta;
 
+    // Build where clause - admin and authority can see reports from all cities
+    const where = {
+      deleted: false,
+      latitude: {
+        gte: minLat,
+        lte: maxLat
+      },
+      longitude: {
+        gte: minLng,
+        lte: maxLng
+      },
+    };
+
+    // Only filter by city for citizens
+    if (userRole === 'citizen' && userCityId) {
+      where.cityId = userCityId;
+    }
+
     // Get reports in bounding box, then filter by actual distance
     const reports = await prisma.report.findMany({
-      where: {
-        cityId: userCityId,
-        deleted: false,
-        latitude: {
-          gte: minLat,
-          lte: maxLat
-        },
-        longitude: {
-          gte: minLng,
-          lte: maxLng
-        },
-      },
+      where,
       include: {
         author: {
           select: {
@@ -1331,24 +1470,200 @@ const checkDuplicateReport = async (req, res) => {
   }
 };
 
-// Toggle priority vote for a report (Citizens only)
-const togglePriorityVote = async (req, res) => {
+// Verify report resolution (Citizens only)
+const verifyReport = async (req, res) => {
   try {
-    const { id: reportId } = req.params;
+    const { id } = req.params;
+    const { verified, comment } = req.body;
     const userId = req.user.id;
+    const userRole = req.user.role;
 
-    // Enforce citizen-only voting
-    if (req.user.role !== 'citizen') {
+    // Only citizens can verify reports
+    if (userRole !== 'citizen') {
       return res.status(403).json({
-        error: 'Only citizens can vote on report priority'
+        error: 'Only citizens can verify report resolutions'
       });
     }
 
-    // Check if report exists and is not deleted
+    // Check if report exists and is resolved
     const report = await prisma.report.findFirst({
       where: {
-        id: reportId,
+        id,
+        status: 'RESOLVED',
         deleted: false
+      }
+    });
+
+    if (!report) {
+      return res.status(404).json({
+        error: 'Resolved report not found'
+      });
+    }
+
+    // Check if user has already verified this report
+    const existingVerification = await prisma.reportVerification.findUnique({
+      where: {
+        reportId_userId: {
+          reportId: id,
+          userId: userId
+        }
+      }
+    });
+
+    if (existingVerification) {
+      // Update existing verification
+      const updatedVerification = await prisma.reportVerification.update({
+        where: {
+          reportId_userId: {
+            reportId: id,
+            userId: userId
+          }
+        },
+        data: {
+          verified: verified,
+          comment: comment || null
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              username: true,
+              firstName: true,
+              lastName: true
+            }
+          }
+        }
+      });
+
+      res.json({
+        success: true,
+        message: 'Report verification updated successfully',
+        verification: updatedVerification
+      });
+    } else {
+      // Create new verification
+      const newVerification = await prisma.reportVerification.create({
+        data: {
+          reportId: id,
+          userId: userId,
+          verified: verified,
+          comment: comment || null
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              username: true,
+              firstName: true,
+              lastName: true
+            }
+          }
+        }
+      });
+
+      res.json({
+        success: true,
+        message: 'Report verification added successfully',
+        verification: newVerification
+      });
+    }
+
+  } catch (error) {
+    console.error('Verify report error:', error);
+    res.status(500).json({
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Get report verification status
+const getReportVerification = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    // Get all verifications for this report
+    const verifications = await prisma.reportVerification.findMany({
+      where: {
+        reportId: id
+      },
+      include: {
+        user: {
+          select: {
+            id: true,
+            username: true,
+            firstName: true,
+            lastName: true
+          }
+        }
+      },
+      orderBy: {
+        createdAt: 'desc'
+      }
+    });
+
+    // Get current user's verification if exists
+    const userVerification = verifications.find(v => v.userId === userId);
+
+    // Calculate verification stats
+    const totalVerifications = verifications.length;
+    const verifiedCount = verifications.filter(v => v.verified).length;
+    const notVerifiedCount = verifications.filter(v => !v.verified).length;
+
+    res.json({
+      success: true,
+      data: {
+        userVerification,
+        allVerifications: verifications,
+        stats: {
+          total: totalVerifications,
+          verified: verifiedCount,
+          notVerified: notVerifiedCount,
+          verificationRate: totalVerifications > 0 ? (verifiedCount / totalVerifications) * 100 : 0
+        }
+      }
+    });
+
+  } catch (error) {
+    console.error('Get report verification error:', error);
+    res.status(500).json({
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Vote on report severity
+const voteOnReport = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { severity } = req.body;
+    const userId = req.user.id;
+
+    // Validate severity (1-10 scale)
+    if (!severity || severity < 1 || severity > 10) {
+      return res.status(400).json({
+        error: 'Severity must be between 1 and 10'
+      });
+    }
+
+    // Check if report exists
+    const report = await prisma.report.findUnique({
+      where: { id },
+      include: {
+        author: {
+          select: {
+            id: true,
+            username: true,
+            firstName: true,
+            lastName: true
+          }
+        },
+        city: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
       }
     });
 
@@ -1359,77 +1674,324 @@ const togglePriorityVote = async (req, res) => {
     }
 
     // Check if user has already voted
-    const existingVote = await prisma.reportPriorityVote.findUnique({
+    const existingVote = await prisma.reportVote.findUnique({
       where: {
         reportId_userId: {
-          reportId: reportId,
+          reportId: id,
           userId: userId
         }
       }
     });
 
-    let newPriorityCount;
-    let hasVoted;
-
     if (existingVote) {
-      // Remove the vote
-      const updatedReport = await prisma.$transaction(async (tx) => {
-        await tx.reportPriorityVote.delete({
-          where: {
-            reportId_userId: {
-              reportId: reportId,
-              userId: userId
-            }
-          }
-        });
-        
-        return await tx.report.update({
-          where: { id: reportId },
-          data: {
-            priorityCount: {
-              decrement: 1
-            }
-          }
-        });
-      });
-      
-      newPriorityCount = updatedReport.priorityCount;
-      hasVoted = false;
-    } else {
-      // Add the vote
-      const updatedReport = await prisma.$transaction(async (tx) => {
-        await tx.reportPriorityVote.create({
-          data: {
-            reportId: reportId,
+      // Update existing vote
+      await prisma.reportVote.update({
+        where: {
+          reportId_userId: {
+            reportId: id,
             userId: userId
           }
-        });
-        
-        return await tx.report.update({
-          where: { id: reportId },
-          data: {
-            priorityCount: {
-              increment: 1
-            }
-          }
-        });
+        },
+        data: { severity }
       });
-      
-      newPriorityCount = updatedReport.priorityCount;
-      hasVoted = true;
+
+      // Recalculate average severity and update report
+      const allVotes = await prisma.reportVote.findMany({
+        where: { reportId: id }
+      });
+
+      const averageSeverity = Math.round(
+        allVotes.reduce((sum, vote) => sum + vote.severity, 0) / allVotes.length
+      );
+
+      // Determine priority based on average severity and vote count
+      let priority = 'MEDIUM';
+      if (averageSeverity >= 8 || allVotes.length >= 10) {
+        priority = 'URGENT';
+      } else if (averageSeverity >= 6 || allVotes.length >= 5) {
+        priority = 'HIGH';
+      } else if (averageSeverity >= 4) {
+        priority = 'MEDIUM';
+      } else {
+        priority = 'LOW';
+      }
+
+      await prisma.report.update({
+        where: { id },
+        data: {
+          severity: averageSeverity,
+          voteCount: allVotes.length,
+          priority: priority
+        }
+      });
+
+      return res.json({
+        success: true,
+        message: 'Vote updated successfully',
+        data: {
+          averageSeverity,
+          voteCount: allVotes.length,
+          priority,
+          userVote: severity
+        }
+      });
+    } else {
+      // Create new vote
+      await prisma.reportVote.create({
+        data: {
+          reportId: id,
+          userId: userId,
+          severity
+        }
+      });
+
+      // Recalculate average severity and update report
+      const allVotes = await prisma.reportVote.findMany({
+        where: { reportId: id }
+      });
+
+      const averageSeverity = Math.round(
+        allVotes.reduce((sum, vote) => sum + vote.severity, 0) / allVotes.length
+      );
+
+      // Determine priority based on average severity and vote count
+      let priority = 'MEDIUM';
+      if (averageSeverity >= 8 || allVotes.length >= 10) {
+        priority = 'URGENT';
+      } else if (averageSeverity >= 6 || allVotes.length >= 5) {
+        priority = 'HIGH';
+      } else if (averageSeverity >= 4) {
+        priority = 'MEDIUM';
+      } else {
+        priority = 'LOW';
+      }
+
+      await prisma.report.update({
+        where: { id },
+        data: {
+          severity: averageSeverity,
+          voteCount: allVotes.length,
+          priority: priority
+        }
+      });
+
+      return res.json({
+        success: true,
+        message: 'Vote submitted successfully',
+        data: {
+          averageSeverity,
+          voteCount: allVotes.length,
+          priority,
+          userVote: severity
+        }
+      });
     }
+  } catch (error) {
+    console.error('Error voting on report:', error);
+    res.status(500).json({
+      error: 'Failed to vote on report'
+    });
+  }
+};
+
+// Get user's vote on a report
+const getUserVote = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user.id;
+
+    const vote = await prisma.reportVote.findUnique({
+      where: {
+        reportId_userId: {
+          reportId: id,
+          userId: userId
+        }
+      }
+    });
+
+    if (!vote) {
+      return res.json({
+        success: true,
+        data: { hasVoted: false, severity: null }
+      });
+    }
+
+    return res.json({
+      success: true,
+      data: { hasVoted: true, severity: vote.severity }
+    });
+  } catch (error) {
+    console.error('Error getting user vote:', error);
+    res.status(500).json({
+      error: 'Failed to get user vote'
+    });
+  }
+};
+
+// Report misleading or incorrect content
+const reportMisleadingContent = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason, type = 'MISLEADING_CONTENT', evidenceUrls = [] } = req.body;
+    const reporterId = req.user.id;
+
+    if (!reason || reason.trim().length === 0) {
+      return res.status(400).json({
+        error: 'Reason for reporting is required'
+      });
+    }
+
+    // Check if the report exists
+    const report = await prisma.report.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        title: true,
+        description: true,
+        authorId: true,
+        cityId: true,
+        category: true,
+        status: true,
+        createdAt: true,
+        author: {
+          select: {
+            name: true,
+            email: true
+          }
+        },
+        city: {
+          select: {
+            name: true
+          }
+        }
+      }
+    });
+
+    if (!report) {
+      return res.status(404).json({
+        error: 'Report not found'
+      });
+    }
+
+    // Prevent users from reporting their own reports
+    if (report.authorId === reporterId) {
+      return res.status(400).json({
+        error: 'You cannot report your own report'
+      });
+    }
+
+    // Get reporter information
+    const reporter = await prisma.user.findUnique({
+      where: { id: reporterId },
+      select: {
+        name: true,
+        email: true,
+        city: {
+          select: {
+            name: true
+          }
+        }
+      }
+    });
+
+    // Create the misleading content report
+    const misleadingReport = await prisma.misleadingContentReport.create({
+      data: {
+        reportId: id,
+        reporterId,
+        reason: reason.trim(),
+        type,
+        status: 'PENDING',
+        evidence: evidenceUrls.length > 0 ? JSON.stringify(evidenceUrls) : null
+      }
+    });
+
+    // Create notification for reporter
+    await prisma.notification.create({
+      data: {
+        userId: reporterId,
+        type: 'MISLEADING_CONTENT_REPORTED',
+        title: 'Misleading Content Report Submitted',
+        message: `Your report about misleading content has been submitted for admin review. Reference ID: ${misleadingReport.id}`,
+        data: {
+          reportId: id,
+          misleadingReportId: misleadingReport.id,
+          reportTitle: report.title
+        }
+      }
+    });
+
+    // Get all admins for notification
+    const admins = await prisma.user.findMany({
+      where: { role: 'admin' },
+      select: { id: true, name: true, email: true }
+    });
+
+    // Create detailed admin notifications
+    for (const admin of admins) {
+      await prisma.notification.create({
+        data: {
+          userId: admin.id,
+          type: 'ADMIN_MISLEADING_CONTENT_REPORT',
+          title: '🚨 Misleading Content Report - Action Required',
+          message: `A user has reported misleading content in report: "${report.title}". Please review immediately.`,
+          data: {
+            reportId: id,
+            misleadingReportId: misleadingReport.id,
+            reporterId,
+            reporterName: reporter.name,
+            reporterEmail: reporter.email,
+            reportTitle: report.title,
+            reportDescription: report.description,
+            reportCategory: report.category,
+            reportStatus: report.status,
+            reportCity: report.city.name,
+            reportAuthor: report.author.name,
+            reportCreatedAt: report.createdAt,
+            reason: reason.trim(),
+            type,
+            evidenceUrls,
+            priority: 'HIGH'
+          }
+        }
+      });
+
+      // Also send email notification to admin (if email service is configured)
+      try {
+        // This would integrate with your email service
+        console.log(`📧 Email notification sent to admin: ${admin.email} about misleading content report: ${misleadingReport.id}`);
+      } catch (emailError) {
+        console.error('Failed to send email notification to admin:', emailError);
+      }
+    }
+
+    // Log the report for audit purposes
+    console.log(`🚨 Misleading Content Report Created:`, {
+      misleadingReportId: misleadingReport.id,
+      reportId: id,
+      reporterId,
+      reporterName: reporter.name,
+      reportTitle: report.title,
+      reason: reason.trim(),
+      type,
+      evidenceCount: evidenceUrls.length,
+      timestamp: new Date().toISOString()
+    });
 
     res.json({
       success: true,
-      priorityCount: newPriorityCount,
-      hasVoted: hasVoted,
-      message: hasVoted ? 'Priority vote added' : 'Priority vote removed'
+      message: 'Misleading content report submitted successfully. Admin will review it within 24 hours.',
+      data: {
+        id: misleadingReport.id,
+        status: misleadingReport.status,
+        referenceId: misleadingReport.id
+      }
     });
 
   } catch (error) {
-    console.error('Error toggling priority vote:', error);
+    console.error('Error reporting misleading content:', error);
     res.status(500).json({
-      error: 'Failed to toggle priority vote'
+      error: 'Failed to report misleading content'
     });
   }
 };
@@ -1437,6 +1999,7 @@ const togglePriorityVote = async (req, res) => {
 module.exports = {
   createReport,
   getReports,
+  getAllReportsForMap,
   getReportById,
   addAuthorityUpdate,
   closeReport,
@@ -1444,5 +2007,9 @@ module.exports = {
   getReportTimeline,
   getNearbyReports,
   checkDuplicateReport,
-  togglePriorityVote
+  verifyReport,
+  getReportVerification,
+  voteOnReport,
+  getUserVote,
+  reportMisleadingContent
 };

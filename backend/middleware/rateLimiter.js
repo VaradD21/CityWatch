@@ -1,32 +1,32 @@
 const rateLimit = require('express-rate-limit');
 
-// Check if we're in development mode
-const isDevelopment = process.env.NODE_ENV === 'development';
+// DISABLED RATE LIMITING - Set extremely high limits to never trigger
+// All rate limits are set to 999999 requests to effectively disable them
 
-// General rate limiter for public routes
+// General rate limiter for public routes - DISABLED
 const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: isDevelopment ? 1000 : 100, // 1000 for dev, 100 for production
+  max: 999999, // Effectively unlimited
   message: {
-    error: 'Too many requests from this IP, please try again later.',
+    error: 'Rate limit disabled - this should never show',
     retryAfter: '15 minutes'
   },
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
     res.status(429).json({
-      error: 'Too many requests from this IP, please try again later.',
-      retryAfter: Math.round(15 * 60) // seconds
+      error: 'Rate limit disabled - this should never show',
+      retryAfter: Math.round(15 * 60)
     });
   }
 });
 
-// Strict rate limiter for auth routes
+// Auth rate limiter - DISABLED
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: isDevelopment ? 50 : 5, // 5 attempts per 15 minutes in production
+  max: 999999, // Effectively unlimited
   message: {
-    error: 'Too many authentication attempts, please try again later.',
+    error: 'Rate limit disabled - this should never show',
     retryAfter: '15 minutes'
   },
   standardHeaders: true,
@@ -34,97 +34,97 @@ const authLimiter = rateLimit({
   skipSuccessfulRequests: true,
   handler: (req, res) => {
     res.status(429).json({
-      error: 'Too many authentication attempts, please try again later.',
+      error: 'Rate limit disabled - this should never show',
       retryAfter: Math.round(15 * 60)
     });
   }
 });
 
-// Moderate rate limiter for API routes
+// API rate limiter - DISABLED
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: isDevelopment ? 500 : 100, // 100 requests per 15 minutes in production
+  max: 999999, // Effectively unlimited
   message: {
-    error: 'Too many API requests, please try again later.',
+    error: 'Rate limit disabled - this should never show',
     retryAfter: '15 minutes'
   },
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
     res.status(429).json({
-      error: 'Too many API requests, please try again later.',
+      error: 'Rate limit disabled - this should never show',
       retryAfter: Math.round(15 * 60)
     });
   }
 });
 
-// Heavy GET routes (reports, comments, search)
+// Heavy GET routes - DISABLED
 const heavyGetLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: isDevelopment ? 200 : 30, // 30 requests per minute in production
+  max: 999999, // Effectively unlimited
   message: {
-    error: 'Too many requests for this endpoint, please try again later.',
+    error: 'Rate limit disabled - this should never show',
     retryAfter: '1 minute'
   },
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
     res.status(429).json({
-      error: 'Too many requests for this endpoint, please try again later.',
+      error: 'Rate limit disabled - this should never show',
       retryAfter: Math.round(1 * 60)
     });
   }
 });
 
-// POST routes (create, update, delete)
+// POST routes - DISABLED
 const postLimiter = rateLimit({
   windowMs: 1 * 60 * 1000, // 1 minute
-  max: isDevelopment ? 100 : 10, // 10 requests per minute in production
+  max: 999999, // Effectively unlimited
   message: {
-    error: 'Too many requests for this endpoint, please try again later.',
+    error: 'Rate limit disabled - this should never show',
     retryAfter: '1 minute'
   },
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
     res.status(429).json({
-      error: 'Too many requests for this endpoint, please try again later.',
+      error: 'Rate limit disabled - this should never show',
       retryAfter: Math.round(1 * 60)
     });
   }
 });
 
-// File upload rate limiter
+// File upload rate limiter - DISABLED
 const uploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: isDevelopment ? 50 : 5, // 5 uploads per 15 minutes in production
+  max: 999999, // Effectively unlimited
   message: {
-    error: 'Too many file uploads, please try again later.',
+    error: 'Rate limit disabled - this should never show',
     retryAfter: '15 minutes'
   },
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
     res.status(429).json({
-      error: 'Too many file uploads, please try again later.',
+      error: 'Rate limit disabled - this should never show',
       retryAfter: Math.round(15 * 60)
     });
   }
 });
 
-// Strict rate limiter for password reset and sensitive operations
+// Sensitive operations rate limiter - DISABLED
 const sensitiveLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: isDevelopment ? 10 : 3, // 3 attempts per hour in production
+  max: 999999, // Effectively unlimited
   message: {
-    error: 'Too many attempts for this sensitive operation, please try again later.',
+    error: 'Rate limit disabled - this should never show',
     retryAfter: '1 hour'
   },
   standardHeaders: true,
   legacyHeaders: false,
   handler: (req, res) => {
     res.status(429).json({
-      error: 'Too many attempts for this sensitive operation, please try again later.',
+      error: 'Rate limit disabled - this should never show',
       retryAfter: Math.round(60 * 60)
     });
   }

@@ -11,19 +11,17 @@ const { sanitizeAll } = require('./middleware/sanitize');
 const { errorHandler } = require('./middleware/errorHandler');
 const { securityHeaders } = require('./middleware/securityHeaders');
 const { checkTokenBlacklist } = require('./middleware/tokenBlacklist');
-const { csrfProtection } = require('./middleware/csrf');
-const logger = require('./utils/logger');
 
 // Validate required environment variables
-const requiredEnvVars = ['JWT_SECRET', 'JWT_REFRESH_SECRET', 'DATABASE_URL', 'NODE_ENV'];
+const requiredEnvVars = ['JWT_SECRET', 'JWT_REFRESH_SECRET', 'DATABASE_URL'];
 const missingEnvVars = requiredEnvVars.filter((envVar) => !process.env[envVar]);
 
 if (missingEnvVars.length > 0) {
-  logger.error(
+  console.error(
     '❌ Missing required environment variables:',
     missingEnvVars.join(', ')
   );
-  logger.error(
+  console.error(
     'Please check your .env file and ensure all required variables are set.'
   );
   process.exit(1);
@@ -31,7 +29,7 @@ if (missingEnvVars.length > 0) {
 
 // Validate JWT secret strength
 if (process.env.JWT_SECRET && process.env.JWT_SECRET.length < 32) {
-  logger.error(
+  console.error(
     '❌ JWT_SECRET must be at least 32 characters long for security.'
   );
   process.exit(1);
@@ -41,7 +39,7 @@ if (
   process.env.JWT_REFRESH_SECRET &&
   process.env.JWT_REFRESH_SECRET.length < 32
 ) {
-  logger.error(
+  console.error(
     '❌ JWT_REFRESH_SECRET must be at least 32 characters long for security.'
   );
   process.exit(1);
@@ -78,8 +76,12 @@ const corsOptions = {
     const allowedOrigins = [
       'http://localhost:3000',
       'http://localhost:5173',
+      'http://localhost:5174',
+      'http://localhost:5175',
       'http://127.0.0.1:3000',
-      'http://127.0.0.1:5173'
+      'http://127.0.0.1:5173',
+      'http://127.0.0.1:5174',
+      'http://127.0.0.1:5175'
     ];
     
     // Add production origins if in production
@@ -112,9 +114,6 @@ app.use(securityHeaders);
 
 // Token blacklist check for all API routes
 app.use('/api', checkTokenBlacklist);
-
-// CSRF protection for non-JWT routes
-app.use(csrfProtection);
 
 // Rate limiting
 app.use('/api', apiLimiter);
@@ -200,8 +199,6 @@ app.get('/api/health', (req, res) => {
 app.use(errorHandler);
 
 // Start server
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-  console.log(`Local: http://localhost:${PORT}`);
-  console.log(`Network: http://10.150.176.131:${PORT}`);
 });

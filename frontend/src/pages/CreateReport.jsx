@@ -15,10 +15,11 @@ const CreateReport = () => {
   const [formData, setFormData] = useState({
     title: '',
     description: '',
-    category: '',
     latitude: '',
     longitude: ''
   });
+  const [aiAnalysis, setAiAnalysis] = useState(null);
+  const [analyzing, setAnalyzing] = useState(false);
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -31,13 +32,52 @@ const CreateReport = () => {
   const [duplicateMatches, setDuplicateMatches] = useState([]);
   const [submittingAnyway, setSubmittingAnyway] = useState(false);
 
-  const categories = [
-    'GARBAGE',
-    'ROAD',
-    'WATER',
-    'POWER',
-    'OTHER'
-  ];
+  // AI Analysis function
+  const analyzeContent = async () => {
+    if (!formData.title.trim() || !formData.description.trim()) {
+      setAiAnalysis(null);
+      return;
+    }
+
+    console.log('🤖 Starting AI analysis for:', formData.title);
+    setAnalyzing(true);
+    try {
+      const response = await makeAuthenticatedRequest(API_ENDPOINTS.AI_ANALYZE_AUTHORITY, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          title: formData.title.trim(),
+          description: formData.description.trim()
+        })
+      });
+
+      console.log('🤖 AI Analysis response status:', response.status);
+      
+      if (response.ok) {
+        const data = await response.json();
+        console.log('🤖 AI Analysis data:', data);
+        setAiAnalysis(data.data.analysis);
+      } else {
+        const errorData = await response.json();
+        console.error('🤖 AI Analysis error:', errorData);
+      }
+    } catch (error) {
+      console.error('🤖 AI analysis failed:', error);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  // Analyze content when title or description changes
+  React.useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      analyzeContent();
+    }, 1000); // Debounce for 1 second
+
+    return () => clearTimeout(timeoutId);
+  }, [formData.title, formData.description]);
 
   const handleChange = (e) => {
     setFormData({
@@ -50,13 +90,13 @@ const CreateReport = () => {
   const handleFileChange = (e) => {
     const selectedFiles = Array.from(e.target.files);
     
-    // Validate file types and sizes
+    // Validate file types and sizes - Only allow images for mandatory requirement
     const validFiles = selectedFiles.filter(file => {
-      const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'application/pdf', 'text/plain'];
+      const validImageTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
       const maxSize = 5 * 1024 * 1024; // 5MB
       
-      if (!validTypes.includes(file.type)) {
-        setError(`File ${file.name} is not a supported type. Please upload images, PDFs, or text files.`);
+      if (!validImageTypes.includes(file.type)) {
+        setError(`File ${file.name} is not a supported image type. Please upload only images (JPEG, PNG, GIF, WebP).`);
         return false;
       }
       
@@ -70,7 +110,7 @@ const CreateReport = () => {
 
     if (validFiles.length > 0) {
       setError(''); // Clear any previous errors
-      setFiles(prev => [...prev, ...validFiles].slice(0, 5)); // Max 5 files
+      setFiles(prev => [...prev, ...validFiles].slice(0, 10)); // Max 10 image files
     }
   };
 
@@ -137,8 +177,8 @@ const CreateReport = () => {
     setError('');
 
     // Validation
-    if (!formData.title.trim() || !formData.description.trim() || !formData.category) {
-      setError('All fields are required');
+    if (!formData.title.trim() || !formData.description.trim()) {
+      setError('Title and description are required');
       setLoading(false);
       return;
     }
@@ -158,6 +198,13 @@ const CreateReport = () => {
 
     if (formData.description.trim().length < 10) {
       setError('Description must be at least 10 characters long');
+      setLoading(false);
+      return;
+    }
+
+    // Image validation - At least 2 images required
+    if (files.length < 2) {
+      setError('At least 2 images are required to submit a report. Please upload clear photos of the issue.');
       setLoading(false);
       return;
     }
@@ -337,25 +384,56 @@ const CreateReport = () => {
                 <p className="mt-1 text-sm text-gray-500">Minimum 10 characters</p>
               </div>
 
+              {/* AI Analysis Display */}
               <div>
-                <label htmlFor="category" className="block text-sm font-medium text-gray-700 mb-2">
-                  Category *
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  AI Analysis
                 </label>
-                <select
-                  id="category"
-                  name="category"
-                  required
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                  value={formData.category}
-                  onChange={handleChange}
-                >
-                  <option value="">Select a category</option>
-                  {categories.map((category) => (
-                    <option key={category} value={category}>
-                      {category}
-                    </option>
-                  ))}
-                </select>
+                
+                {analyzing && (
+                  <div className="flex items-center space-x-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                    <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                    <span className="text-sm text-blue-600">Analyzing your report...</span>
+                  </div>
+                )}
+
+                {aiAnalysis && !analyzing && (
+                  <div className="p-4 bg-green-50 border border-green-200 rounded-md">
+                    <div className="flex items-start space-x-3">
+                      <svg className="w-5 h-5 text-green-400 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                        <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                      </svg>
+                      <div className="flex-1">
+                        <h4 className="text-sm font-medium text-green-800 mb-2">AI Analysis Complete</h4>
+                        <div className="space-y-2 text-sm text-green-700">
+                          <div>
+                            <span className="font-medium">Category:</span> {aiAnalysis.category}
+                            <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
+                              {(aiAnalysis.categoryConfidence * 100).toFixed(0)}% confidence
+                            </span>
+                          </div>
+                          <div>
+                            <span className="font-medium">Authority:</span> {aiAnalysis.authorityType}
+                            <span className="ml-2 text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
+                              {(aiAnalysis.authorityConfidence * 100).toFixed(0)}% confidence
+                            </span>
+                          </div>
+                          <div className="text-xs text-green-600 mt-2">
+                            <span className="font-medium">Reasoning:</span> {aiAnalysis.categoryReasoning}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {!aiAnalysis && !analyzing && formData.title.trim() && formData.description.trim() && (
+                  <div className="p-3 bg-gray-50 border border-gray-200 rounded-md">
+                    <p className="text-sm text-gray-600">
+                      Enter your title and description above for AI analysis...
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Location Section */}
@@ -498,41 +576,52 @@ const CreateReport = () => {
 
               <div>
                 <label htmlFor="files" className="block text-sm font-medium text-gray-700 mb-2">
-                  Attachments (Optional)
+                  Images * (Minimum 2 required)
                 </label>
                 <input
                   type="file"
                   id="files"
                   multiple
-                  accept="image/*,.pdf,.txt"
+                  accept="image/*"
                   onChange={handleFileChange}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
                 />
                 <p className="mt-1 text-sm text-gray-500">
-                  Upload images, PDFs, or text files (max 5 files, 5MB each)
+                  Upload clear photos of the issue (minimum 2 images, maximum 10 images, 5MB each)
+                </p>
+                <p className="mt-1 text-sm text-red-600 font-medium">
+                  {files.length < 2 ? `${2 - files.length} more image(s) required` : `${files.length}/10 images uploaded`}
                 </p>
                 
                 {files.length > 0 && (
                   <div className="mt-3">
-                    <h4 className="text-sm font-medium text-gray-700 mb-2">Selected Files:</h4>
-                    <div className="space-y-2">
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">Selected Images ({files.length}/10):</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                       {files.map((file, index) => (
-                        <div key={index} className="flex items-center justify-between bg-gray-50 p-2 rounded-md">
-                          <div className="flex items-center space-x-2">
-                            <span className="text-sm text-gray-600">{file.name}</span>
-                            <span className="text-xs text-gray-500">
-                              ({Math.round(file.size / 1024)} KB)
-                            </span>
+                        <div key={index} className="relative bg-gray-50 rounded-lg p-2 border border-gray-200">
+                          <div className="aspect-square bg-gray-100 rounded-md overflow-hidden mb-2">
+                            <img
+                              src={URL.createObjectURL(file)}
+                              alt={`Preview ${index + 1}`}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                          <div className="text-center">
+                            <p className="text-xs text-gray-600 truncate" title={file.name}>
+                              {file.name}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {Math.round(file.size / 1024)} KB
+                            </p>
                           </div>
                           <Button
                             type="button"
                             onClick={() => removeFile(index)}
                             variant="ghost"
                             size="sm"
-                            leftIcon={<X className="w-3 h-3" />}
-                            className="text-error-600 hover:text-error-800"
+                            className="absolute top-1 right-1 p-1 h-6 w-6 bg-red-500 hover:bg-red-600 text-white rounded-full"
                           >
-                            Remove
+                            <X className="w-3 h-3" />
                           </Button>
                         </div>
                       ))}
@@ -548,6 +637,7 @@ const CreateReport = () => {
                   loading={loading}
                   fullWidth
                   className="flex-1"
+                  disabled={!formData.title.trim() || !formData.description.trim() || !formData.latitude || !formData.longitude || files.length < 2}
                 >
                   {loading ? 'Creating Report...' : 'Create Report'}
                 </Button>

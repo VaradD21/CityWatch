@@ -2,8 +2,8 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const prisma = require('../services/database');
 const { generateOTP, sendOTPEmail } = require('../utils/mailer');
+const { generateOTP: generatePhoneOTP, sendOTPSMS } = require('../utils/smsService');
 const { blacklistToken } = require('../middleware/tokenBlacklist');
-const logger = require('../utils/logger');
 
 // Generate JWT tokens
 const generateTokens = (userId) => {
@@ -20,22 +20,16 @@ const generateTokens = (userId) => {
 
 // Validate email format
 const isValidEmail = (email) => {
-  if (!email || typeof email !== 'string') return false;
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-  return emailRegex.test(email) && email.length <= 254; // RFC 5321 limit
+  return emailRegex.test(email);
 };
 
 // Validate password strength
 const isValidPassword = (password) => {
-  if (!password || typeof password !== 'string') return false;
-  return password.length >= 8 && password.length <= 128;
-};
-
-// Validate username format
-const isValidUsername = (username) => {
-  if (!username || typeof username !== 'string') return false;
-  const usernameRegex = /^[a-zA-Z0-9_-]{3,30}$/;
-  return usernameRegex.test(username);
+  // At least 8 characters, 1 number, 1 special character
+  const passwordRegex =
+    /^(?=.*[A-Za-z])(?=.*\d)(?=.*[@$!%*#?&])[A-Za-z\d@$!%*#?&]{8,}$/;
+  return passwordRegex.test(password);
 };
 
 // Validate mobile number (Indian format)
@@ -84,17 +78,19 @@ const validateSignupData = async (req, res) => {
       !firstName ||
       !lastName ||
       !dob ||
-      !mobile
+      !mobile ||
+      !agreedTos
     ) {
       return res.status(400).json({
         error:
-          'All fields are required: username, email, password, cityId, firstName, lastName, dob, mobile'
+          'All fields are required: username, email, password, cityId, firstName, lastName, dob, mobile, and you must agree to terms and conditions'
       });
     }
 
+    // Validate terms and conditions agreement
     if (!agreedTos) {
       return res.status(400).json({
-        error: 'You must agree to the Terms and Conditions'
+        error: 'You must agree to the terms and conditions'
       });
     }
 
@@ -363,7 +359,9 @@ const completeSignup = async (req, res) => {
           select: {
             id: true,
             name: true,
-            slug: true
+            slug: true,
+            latitude: true,
+            longitude: true
           },
         },
         createdAt: true,
@@ -394,35 +392,28 @@ const completeSignup = async (req, res) => {
 // Login
 const login = async (req, res) => {
   try {
-    const { email, password } = req.body;
+    const { emailOrUsername, password } = req.body;
 
     // Validation
-    if (!email || !password) {
+    if (!emailOrUsername || !password) {
       return res.status(400).json({
-        error: 'Email and password are required'
+        error: 'Email/Username and password are required'
       });
     }
 
-    if (!isValidEmail(email)) {
-      return res.status(400).json({
-        error: 'Please provide a valid email address'
-      });
-    }
-
-    if (!isValidPassword(password)) {
-      return res.status(400).json({
-        error: 'Invalid password format'
-      });
-    }
-
-    // Find user
-    const user = await prisma.user.findUnique({
-      where: { email }
+    // Find user by email or username
+    const user = await prisma.user.findFirst({
+      where: {
+        OR: [
+          { email: emailOrUsername },
+          { username: emailOrUsername }
+        ]
+      }
     });
 
     if (!user) {
       return res.status(401).json({
-        error: 'Invalid email or password'
+        error: 'Invalid email/username or password'
       });
     }
 
@@ -471,7 +462,7 @@ const login = async (req, res) => {
       refreshToken
     });
   } catch (error) {
-    logger.error('Login error:', error);
+    console.error('Login error:', error);
     res.status(500).json({
       error: 'Internal server error'
     });
@@ -505,7 +496,9 @@ const refreshToken = async (req, res) => {
           select: {
             id: true,
             name: true,
-            slug: true
+            slug: true,
+            latitude: true,
+            longitude: true
           },
         },
         createdAt: true,
@@ -519,13 +512,13 @@ const refreshToken = async (req, res) => {
       });
     }
 
-    // Generate new tokens first
+    // Blacklist the old refresh token
+    blacklistToken(refreshToken);
+
+    // Generate new tokens
     const { accessToken, refreshToken: newRefreshToken } = generateTokens(
       user.id
     );
-
-    // Then blacklist the old refresh token
-    blacklistToken(refreshToken);
 
     res.json({
       accessToken,
@@ -542,7 +535,7 @@ const refreshToken = async (req, res) => {
       });
     }
 
-    logger.error('Refresh token error:', error);
+    console.error('Refresh token error:', error);
     res.status(500).json({
       error: 'Internal server error'
     });
@@ -563,7 +556,7 @@ const logout = async (req, res) => {
       message: 'Logged out successfully'
     });
   } catch (error) {
-    logger.error('Logout error:', error);
+    console.error('Logout error:', error);
     res.status(500).json({
       error: 'Internal server error'
     });
@@ -670,7 +663,9 @@ const verifyOTP = async (req, res) => {
           select: {
             id: true,
             name: true,
-            slug: true
+            slug: true,
+            latitude: true,
+            longitude: true
           },
         },
         createdAt: true,
@@ -770,6 +765,147 @@ const resendOTP = async (req, res) => {
   }
 };
 
+// Send phone verification OTP
+const sendPhoneVerificationOTP = async (req, res) => {
+  try {
+    const { phoneNumber } = req.body;
+    const userId = req.user.id;
+
+    if (!phoneNumber) {
+      return res.status(400).json({
+        error: 'Phone number is required'
+      });
+    }
+
+    if (!isValidMobile(phoneNumber)) {
+      return res.status(400).json({
+        error: 'Please provide a valid 10-digit Indian mobile number'
+      });
+    }
+
+    // Check if phone number is already verified for another user
+    const existingUser = await prisma.user.findFirst({
+      where: {
+        mobile: phoneNumber,
+        isPhoneVerified: true,
+        id: { not: userId }
+      }
+    });
+
+    if (existingUser) {
+      return res.status(400).json({
+        error: 'This phone number is already verified for another account'
+      });
+    }
+
+    // Generate OTP
+    const otp = generatePhoneOTP();
+    const otpExpires = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+    // Update user with phone OTP
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        phoneOtpCode: otp,
+        phoneOtpExpires: otpExpires
+      }
+    });
+
+    // Send SMS
+    const smsResult = await sendOTPSMS(phoneNumber, otp);
+    
+    if (!smsResult.success) {
+      return res.status(500).json({
+        error: 'Failed to send verification SMS'
+      });
+    }
+
+    const response = {
+      message: 'Phone verification OTP sent successfully'
+    };
+
+    // If in demo mode, include the OTP in the response
+    if (smsResult.demo) {
+      response.demo = true;
+      response.otp = otp;
+      response.note = 'SMS service not configured. Use the OTP above for testing.';
+    }
+
+    res.json(response);
+
+  } catch (error) {
+    console.error('Send phone OTP error:', error);
+    res.status(500).json({
+      error: 'Internal server error'
+    });
+  }
+};
+
+// Verify phone OTP
+const verifyPhoneOTP = async (req, res) => {
+  try {
+    const { otp } = req.body;
+    const userId = req.user.id;
+
+    if (!otp) {
+      return res.status(400).json({
+        error: 'OTP is required'
+      });
+    }
+
+    // Get user
+    const user = await prisma.user.findUnique({
+      where: { id: userId }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        error: 'User not found'
+      });
+    }
+
+    // Check if OTP exists and is not expired
+    if (!user.phoneOtpCode || !user.phoneOtpExpires) {
+      return res.status(400).json({
+        error: 'No verification OTP found. Please request a new one.'
+      });
+    }
+
+    if (new Date() > user.phoneOtpExpires) {
+      return res.status(400).json({
+        error: 'OTP has expired. Please request a new one.'
+      });
+    }
+
+    // Verify OTP
+    if (user.phoneOtpCode !== otp) {
+      return res.status(400).json({
+        error: 'Invalid OTP'
+      });
+    }
+
+    // Mark phone as verified and clear OTP
+    await prisma.user.update({
+      where: { id: userId },
+      data: {
+        isPhoneVerified: true,
+        phoneOtpCode: null,
+        phoneOtpExpires: null
+      }
+    });
+
+    res.json({
+      message: 'Phone number verified successfully'
+    });
+
+  } catch (error) {
+    console.error('Verify phone OTP error:', error);
+    res.status(500).json({
+      error: 'Internal server error'
+    });
+  }
+};
+
 module.exports = {
   validateSignupData,
   sendVerificationEmail,
@@ -779,5 +915,7 @@ module.exports = {
   refreshToken,
   getMe,
   verifyOTP,
-  resendOTP
+  resendOTP,
+  sendPhoneVerificationOTP,
+  verifyPhoneOTP
 };

@@ -1,10 +1,9 @@
 const jwt = require('jsonwebtoken');
 const prisma = require('../services/database');
-const { isTokenBlacklisted } = require('./tokenBlacklist');
 
 const authMiddleware = async (req, res, next) => {
   try {
-    const authHeader = req.header('Authorization');
+    const authHeader = req.headers.authorization;
 
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({
@@ -17,13 +16,6 @@ const authMiddleware = async (req, res, next) => {
     if (!token) {
       return res.status(401).json({
         error: 'Access denied. No token provided.'
-      });
-    }
-
-    // Check if token is blacklisted before verification
-    if (isTokenBlacklisted(token)) {
-      return res.status(401).json({
-        error: 'Token has been revoked. Please login again.'
       });
     }
 
@@ -45,7 +37,9 @@ const authMiddleware = async (req, res, next) => {
           select: {
             id: true,
             name: true,
-            slug: true
+            slug: true,
+            latitude: true,
+            longitude: true
           },
         },
         createdAt: true,

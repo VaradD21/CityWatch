@@ -19,12 +19,355 @@ class AIService {
         "All quiet on the city front! No new updates at the moment."
       ]
     };
+
+    // Authority type analysis keywords and patterns
+    this.authorityAnalysis = {
+      'Police Department': {
+        keywords: ['theft', 'robbery', 'crime', 'vandalism', 'assault', 'fight', 'dispute', 'suspicious', 'illegal', 'drug', 'alcohol', 'noise complaint', 'harassment', 'stolen', 'burglary', 'fraud', 'scam', 'threat', 'violence', 'weapon', 'gun', 'knife', 'riot', 'protest', 'disturbance', 'trespassing', 'break-in'],
+        patterns: [/theft|stolen|robbery|burglary/i, /crime|criminal/i, /police|cop|officer/i, /fight|assault|violence/i, /drug|alcohol|drunk/i, /noise|disturbance/i, /suspicious|illegal/i],
+        priority: 1
+      },
+      'Fire Department': {
+        keywords: ['fire', 'smoke', 'burning', 'flame', 'explosion', 'gas leak', 'electrical fire', 'wildfire', 'emergency rescue', 'trapped', 'stuck', 'elevator', 'accident', 'collision', 'crash', 'hazard', 'dangerous'],
+        patterns: [/fire|burning|smoke|flame/i, /gas leak|explosion/i, /rescue|trapped|stuck/i, /emergency|accident|crash/i, /hazard|dangerous/i],
+        priority: 1
+      },
+      'Medical Services': {
+        keywords: ['medical', 'ambulance', 'hospital', 'injured', 'hurt', 'sick', 'unconscious', 'emergency', 'accident', 'fall', 'heart attack', 'stroke', 'bleeding', 'wound', 'health'],
+        patterns: [/medical|ambulance|hospital/i, /injured|hurt|sick|unconscious/i, /heart attack|stroke|bleeding/i, /health|medical emergency/i],
+        priority: 1
+      },
+      'Traffic Control': {
+        keywords: ['traffic', 'road', 'street', 'highway', 'intersection', 'signal', 'light', 'stop sign', 'speed', 'accident', 'collision', 'parking', 'vehicle', 'car', 'bus', 'truck', 'motorcycle', 'bicycle', 'pedestrian', 'crosswalk'],
+        patterns: [/traffic|road|street|highway/i, /signal|light|stop sign/i, /accident|collision/i, /parking|vehicle|car/i, /pedestrian|crosswalk/i],
+        priority: 2
+      },
+      'Emergency Services': {
+        keywords: ['emergency', 'urgent', 'immediate', 'danger', 'hazard', 'disaster', 'flood', 'storm', 'earthquake', 'power outage', 'blackout', 'gas leak', 'water leak', 'sewage', 'flooding'],
+        patterns: [/emergency|urgent|immediate/i, /danger|hazard|disaster/i, /flood|storm|earthquake/i, /power outage|blackout/i, /gas leak|water leak|sewage/i],
+        priority: 1
+      },
+      'Municipal Services': {
+        keywords: ['city hall', 'mayor', 'council', 'permit', 'license', 'complaint', 'administration', 'bureaucracy', 'government', 'public service', 'citizen service'],
+        patterns: [/city hall|mayor|council/i, /permit|license/i, /administration|government/i, /public service|citizen service/i],
+        priority: 3
+      },
+      'Environmental Services': {
+        keywords: ['pollution', 'environment', 'air quality', 'water quality', 'waste', 'garbage', 'recycling', 'contamination', 'toxic', 'chemical', 'oil spill', 'litter', 'cleanup'],
+        patterns: [/pollution|environment|air quality|water quality/i, /waste|garbage|recycling/i, /contamination|toxic|chemical/i, /oil spill|litter|cleanup/i],
+        priority: 2
+      },
+      'Public Works': {
+        keywords: ['infrastructure', 'construction', 'maintenance', 'repair', 'pothole', 'sidewalk', 'street light', 'bridge', 'building', 'facility', 'utilities', 'water line', 'sewer', 'drainage'],
+        patterns: [/infrastructure|construction|maintenance|repair/i, /pothole|sidewalk|street light/i, /bridge|building|facility/i, /utilities|water line|sewer|drainage/i],
+        priority: 2
+      },
+      'Animal Control': {
+        keywords: ['animal', 'dog', 'cat', 'stray', 'wild', 'bite', 'attack', 'noise', 'barking', 'roaming', 'abandoned', 'neglected', 'pest', 'vermin', 'rodent', 'raccoon', 'skunk'],
+        patterns: [/animal|dog|cat|stray|wild/i, /bite|attack/i, /barking|roaming/i, /abandoned|neglected/i, /pest|vermin|rodent/i],
+        priority: 2
+      },
+      'Building Inspection': {
+        keywords: ['building', 'structure', 'safety', 'code', 'violation', 'construction', 'renovation', 'permit', 'inspection', 'unsafe', 'damaged', 'collapsed', 'leaning', 'cracked'],
+        patterns: [/building|structure|safety|code/i, /violation|construction|renovation/i, /permit|inspection/i, /unsafe|damaged|collapsed/i, /leaning|cracked/i],
+        priority: 2
+      }
+    };
   }
 
   // Generate greeting response
   getGreeting() {
     const randomIndex = Math.floor(Math.random() * this.responses.greetings.length);
     return this.responses.greetings[randomIndex];
+  }
+
+  // Analyze report content to determine both category and appropriate authority type
+  async analyzeReportContent(title, description) {
+    try {
+      const combinedText = `${title} ${description}`.toLowerCase();
+      
+      // First, determine the category
+      const categoryAnalysis = this.analyzeCategory(combinedText);
+      
+      // Then determine the authority type based on content and detected category
+      const authorityAnalysis = await this.analyzeAuthorityType(combinedText, categoryAnalysis.category);
+      
+      return {
+        category: categoryAnalysis.category,
+        categoryConfidence: categoryAnalysis.confidence,
+        categoryReasoning: categoryAnalysis.reasoning,
+        authorityType: authorityAnalysis.authorityType,
+        authorityConfidence: authorityAnalysis.confidence,
+        authorityReasoning: authorityAnalysis.reasoning,
+        alternativeOptions: authorityAnalysis.alternativeOptions
+      };
+
+    } catch (error) {
+      console.error('Error analyzing report content:', error);
+      return {
+        category: 'OTHER',
+        categoryConfidence: 0.1,
+        categoryReasoning: 'Error in analysis, defaulting to OTHER category',
+        authorityType: 'Municipal Services',
+        authorityConfidence: 0.1,
+        authorityReasoning: 'Error in analysis, defaulting to Municipal Services'
+      };
+    }
+  }
+
+  // Analyze category from content
+  analyzeCategory(text) {
+    const categoryScores = {
+      'GARBAGE': 0,
+      'ROAD': 0,
+      'WATER': 0,
+      'POWER': 0,
+      'OTHER': 0
+    };
+
+    // GARBAGE category keywords
+    const garbageKeywords = ['garbage', 'trash', 'waste', 'rubbish', 'litter', 'dump', 'landfill', 'recycling', 'bin', 'dustbin', 'cleanup', 'pollution', 'contamination'];
+    const garbagePatterns = [/garbage|trash|waste|rubbish|litter/i, /dump|landfill|cleanup/i, /pollution|contamination/i];
+
+    // ROAD category keywords
+    const roadKeywords = ['road', 'street', 'highway', 'pothole', 'traffic', 'intersection', 'signal', 'light', 'stop sign', 'speed', 'accident', 'collision', 'parking', 'vehicle', 'car', 'bus', 'truck', 'motorcycle', 'bicycle', 'pedestrian', 'crosswalk', 'sidewalk'];
+    const roadPatterns = [/road|street|highway|pothole/i, /traffic|intersection|signal|light/i, /accident|collision|parking/i, /vehicle|car|bus|truck/i, /pedestrian|crosswalk|sidewalk/i];
+
+    // WATER category keywords
+    const waterKeywords = ['water', 'pipe', 'leak', 'flood', 'sewage', 'drainage', 'tap', 'faucet', 'contamination', 'quality', 'supply', 'pressure', 'overflow', 'clogged', 'blocked'];
+    const waterPatterns = [/water|pipe|leak|flood/i, /sewage|drainage/i, /tap|faucet/i, /contamination|quality|supply/i, /overflow|clogged|blocked/i];
+
+    // POWER category keywords
+    const powerKeywords = ['power', 'electricity', 'electrical', 'outage', 'blackout', 'light', 'lamp', 'street light', 'traffic light', 'signal', 'wire', 'cable', 'transformer', 'pole', 'circuit'];
+    const powerPatterns = [/power|electricity|electrical/i, /outage|blackout/i, /light|lamp|street light/i, /traffic light|signal/i, /wire|cable|transformer/i];
+
+    // Score each category
+    for (const keyword of garbageKeywords) {
+      if (text.includes(keyword)) categoryScores.GARBAGE += 2;
+    }
+    for (const pattern of garbagePatterns) {
+      if (pattern.test(text)) categoryScores.GARBAGE += 3;
+    }
+
+    for (const keyword of roadKeywords) {
+      if (text.includes(keyword)) categoryScores.ROAD += 2;
+    }
+    for (const pattern of roadPatterns) {
+      if (pattern.test(text)) categoryScores.ROAD += 3;
+    }
+
+    for (const keyword of waterKeywords) {
+      if (text.includes(keyword)) categoryScores.WATER += 2;
+    }
+    for (const pattern of waterPatterns) {
+      if (pattern.test(text)) categoryScores.WATER += 3;
+    }
+
+    for (const keyword of powerKeywords) {
+      if (text.includes(keyword)) categoryScores.POWER += 2;
+    }
+    for (const pattern of powerPatterns) {
+      if (pattern.test(text)) categoryScores.POWER += 3;
+    }
+
+    // Find the category with highest score
+    const sortedCategories = Object.entries(categoryScores)
+      .sort(([,a], [,b]) => b - a);
+
+    const [selectedCategory, score] = sortedCategories[0];
+    const maxPossibleScore = 20; // Rough estimate
+    const confidence = Math.min(score / maxPossibleScore, 1);
+
+    // Generate reasoning
+    let reasoning = '';
+    if (score === 0) {
+      reasoning = 'No specific category identified from content, defaulting to OTHER';
+    } else {
+      const matchedKeywords = [];
+      switch (selectedCategory) {
+        case 'GARBAGE':
+          matchedKeywords.push(...garbageKeywords.filter(k => text.includes(k)));
+          break;
+        case 'ROAD':
+          matchedKeywords.push(...roadKeywords.filter(k => text.includes(k)));
+          break;
+        case 'WATER':
+          matchedKeywords.push(...waterKeywords.filter(k => text.includes(k)));
+          break;
+        case 'POWER':
+          matchedKeywords.push(...powerKeywords.filter(k => text.includes(k)));
+          break;
+      }
+      reasoning = `Content suggests ${selectedCategory} category based on keywords: ${matchedKeywords.slice(0, 3).join(', ')}`;
+    }
+
+    return {
+      category: selectedCategory,
+      confidence: confidence,
+      reasoning: reasoning
+    };
+  }
+
+  // Analyze authority type (updated to work with detected category)
+  async analyzeAuthorityType(text, category) {
+    const scores = {};
+
+    // Calculate scores for each authority type
+    for (const [authorityType, config] of Object.entries(this.authorityAnalysis)) {
+      let score = 0;
+
+      // Check keywords
+      for (const keyword of config.keywords) {
+        if (text.includes(keyword.toLowerCase())) {
+          score += 2; // Higher weight for exact keyword matches
+        }
+      }
+
+      // Check patterns
+      for (const pattern of config.patterns) {
+        if (pattern.test(text)) {
+          score += 3; // Higher weight for pattern matches
+        }
+      }
+
+      // Category-based scoring
+      switch (category) {
+        case 'GARBAGE':
+          if (authorityType === 'Environmental Services') score += 5;
+          if (authorityType === 'Public Works') score += 3;
+          break;
+        case 'ROAD':
+          if (authorityType === 'Traffic Control') score += 5;
+          if (authorityType === 'Public Works') score += 4;
+          break;
+        case 'WATER':
+          if (authorityType === 'Public Works') score += 5;
+          if (authorityType === 'Environmental Services') score += 3;
+          break;
+        case 'POWER':
+          if (authorityType === 'Emergency Services') score += 5;
+          if (authorityType === 'Public Works') score += 3;
+          break;
+        case 'OTHER':
+          // No specific category bonus for OTHER
+          break;
+      }
+
+      // Priority-based scoring (lower priority number = higher priority)
+      score += (4 - config.priority) * 0.5;
+
+      scores[authorityType] = score;
+    }
+
+    // Find the authority type with highest score
+    const sortedScores = Object.entries(scores)
+      .sort(([,a], [,b]) => b - a)
+      .filter(([,score]) => score > 0);
+
+    if (sortedScores.length === 0) {
+      // Default to Municipal Services if no clear match
+      return {
+        authorityType: 'Municipal Services',
+        confidence: 0.3,
+        reasoning: 'No specific authority type identified, defaulting to Municipal Services'
+      };
+    }
+
+    const [selectedAuthority, score] = sortedScores[0];
+    const maxPossibleScore = 15; // Rough estimate of maximum possible score
+    const confidence = Math.min(score / maxPossibleScore, 1);
+
+    // Get reasoning for the selection
+    const reasoning = this.generateReasoning(selectedAuthority, '', '', category);
+
+    return {
+      authorityType: selectedAuthority,
+      confidence: confidence,
+      reasoning: reasoning,
+      alternativeOptions: sortedScores.slice(1, 3).map(([type, score]) => ({
+        type,
+        confidence: Math.min(score / maxPossibleScore, 1)
+      }))
+    };
+  }
+
+  // Legacy method for backward compatibility
+  async analyzeReportAuthority(title, description, category) {
+    const analysis = await this.analyzeContent(title, description);
+    return {
+      authorityType: analysis.authorityType,
+      confidence: analysis.authorityConfidence,
+      reasoning: analysis.authorityReasoning,
+      alternativeOptions: analysis.alternativeOptions
+    };
+  }
+
+  // Generate reasoning for authority type selection
+  generateReasoning(authorityType, title, description, category) {
+    const reasons = [];
+
+    // Category-based reasoning
+    switch (category) {
+      case 'GARBAGE':
+        if (authorityType === 'Environmental Services') {
+          reasons.push('Report involves waste management or environmental concerns');
+        } else if (authorityType === 'Public Works') {
+          reasons.push('Report involves municipal infrastructure or public services');
+        }
+        break;
+      case 'ROAD':
+        if (authorityType === 'Traffic Control') {
+          reasons.push('Report involves traffic or road safety issues');
+        } else if (authorityType === 'Public Works') {
+          reasons.push('Report involves road infrastructure maintenance');
+        }
+        break;
+      case 'WATER':
+        if (authorityType === 'Public Works') {
+          reasons.push('Report involves water infrastructure or utilities');
+        } else if (authorityType === 'Environmental Services') {
+          reasons.push('Report involves water quality or environmental concerns');
+        }
+        break;
+      case 'POWER':
+        if (authorityType === 'Emergency Services') {
+          reasons.push('Report involves power outages or electrical emergencies');
+        } else if (authorityType === 'Public Works') {
+          reasons.push('Report involves electrical infrastructure');
+        }
+        break;
+    }
+
+    // Content-based reasoning
+    const combinedText = `${title} ${description}`.toLowerCase();
+    const authorityConfig = this.authorityAnalysis[authorityType];
+
+    if (authorityConfig) {
+      // Check for keyword matches
+      const matchedKeywords = authorityConfig.keywords.filter(keyword => 
+        combinedText.includes(keyword.toLowerCase())
+      );
+
+      if (matchedKeywords.length > 0) {
+        reasons.push(`Content contains relevant keywords: ${matchedKeywords.slice(0, 3).join(', ')}`);
+      }
+
+      // Check for pattern matches
+      const matchedPatterns = authorityConfig.patterns.filter(pattern => 
+        pattern.test(combinedText)
+      );
+
+      if (matchedPatterns.length > 0) {
+        reasons.push('Content matches known patterns for this authority type');
+      }
+    }
+
+    // Default reasoning if no specific reasons found
+    if (reasons.length === 0) {
+      reasons.push(`Report type and content suggest ${authorityType} is most appropriate`);
+    }
+
+    return reasons.join('; ');
   }
 
   // Get latest city updates
@@ -377,8 +720,7 @@ Just ask me anything about your city! 🏙️`;
     try {
       const reports = await prisma.report.findMany({
         where: { 
-          authorId: userId,
-          status: { not: 'DELETED' }
+          authorId: userId
         },
         orderBy: { createdAt: 'desc' },
         take: 5,
@@ -539,6 +881,223 @@ Just ask me anything about your city! 🏙️`;
         { text: "Show my reports", type: "action" },
         { text: "Help", type: "action" }
       ];
+    }
+  }
+
+  // Analyze user report content to determine priority and category
+  async analyzeUserReport({ type, reason, description, evidenceUrls = [] }) {
+    try {
+      console.log('🤖 AI: Analyzing user report...', { type, reason, description });
+
+      const combinedText = `${reason} ${description}`.toLowerCase();
+      
+      // Priority analysis based on keywords and content
+      let priority = 'MEDIUM';
+      let confidence = 0.5;
+      let reasoning = '';
+
+      // High priority indicators
+      const highPriorityKeywords = [
+        'harassment', 'threat', 'dangerous', 'illegal', 'fraud', 'scam',
+        'abuse', 'violence', 'inappropriate', 'spam', 'fake'
+      ];
+
+      // Urgent priority indicators
+      const urgentPriorityKeywords = [
+        'emergency', 'immediate', 'urgent', 'threat', 'danger', 'harm',
+        'safety', 'security', 'illegal', 'criminal'
+      ];
+
+      // Count keyword matches
+      const urgentMatches = urgentPriorityKeywords.filter(keyword => 
+        combinedText.includes(keyword)
+      ).length;
+      
+      const highMatches = highPriorityKeywords.filter(keyword => 
+        combinedText.includes(keyword)
+      ).length;
+
+      // Evidence factor
+      const evidenceFactor = evidenceUrls.length > 0 ? 0.2 : 0;
+
+      // Type-based priority adjustment
+      const typePriorityMap = {
+        'HARASSMENT': 0.8,
+        'FRAUD': 0.7,
+        'INAPPROPRIATE_CONTENT': 0.6,
+        'USER_BEHAVIOR': 0.5,
+        'SPAM': 0.4,
+        'OTHER': 0.3
+      };
+
+      const typeScore = typePriorityMap[type] || 0.3;
+
+      // Calculate final priority score
+      const priorityScore = (urgentMatches * 0.4) + (highMatches * 0.2) + typeScore + evidenceFactor;
+
+      if (priorityScore >= 0.8) {
+        priority = 'URGENT';
+        confidence = Math.min(0.95, priorityScore);
+        reasoning = 'Contains urgent keywords, high-risk type, or has evidence';
+      } else if (priorityScore >= 0.6) {
+        priority = 'HIGH';
+        confidence = Math.min(0.85, priorityScore);
+        reasoning = 'Contains high-priority keywords or serious type';
+      } else if (priorityScore >= 0.4) {
+        priority = 'MEDIUM';
+        confidence = Math.min(0.7, priorityScore);
+        reasoning = 'Standard priority based on content analysis';
+      } else {
+        priority = 'LOW';
+        confidence = Math.min(0.6, priorityScore);
+        reasoning = 'Low-priority content or insufficient indicators';
+      }
+
+      const analysis = {
+        priority,
+        confidence: Math.round(confidence * 100) / 100,
+        reasoning,
+        keywordMatches: {
+          urgent: urgentMatches,
+          high: highMatches
+        },
+        evidenceCount: evidenceUrls.length,
+        typeScore,
+        priorityScore: Math.round(priorityScore * 100) / 100
+      };
+
+      console.log('✅ AI: User report analysis complete:', analysis);
+      return analysis;
+
+    } catch (error) {
+      console.error('❌ AI: Error analyzing user report:', error);
+      return {
+        priority: 'MEDIUM',
+        confidence: 0.5,
+        reasoning: 'Default priority due to analysis error',
+        keywordMatches: { urgent: 0, high: 0 },
+        evidenceCount: evidenceUrls.length,
+        typeScore: 0.3,
+        priorityScore: 0.5
+      };
+    }
+  }
+
+  // Enhanced duplicate detection with AI severity analysis
+  async analyzeDuplicateSeverity({ title, description, existingReports }) {
+    try {
+      console.log('🤖 AI: Analyzing duplicate severity...', { title, description });
+
+      const combinedText = `${title} ${description}`.toLowerCase();
+      
+      // Severity analysis based on content and context
+      let severityScore = 5; // Default medium severity
+      let confidence = 0.5;
+      let reasoning = '';
+
+      // Critical severity indicators
+      const criticalKeywords = [
+        'emergency', 'urgent', 'immediate', 'danger', 'hazard', 'accident',
+        'injury', 'fire', 'flood', 'power', 'water', 'gas', 'leak'
+      ];
+
+      // High severity indicators
+      const highSeverityKeywords = [
+        'broken', 'damaged', 'blocked', 'overflow', 'pothole', 'traffic',
+        'noise', 'pollution', 'waste', 'garbage', 'maintenance'
+      ];
+
+      // Low severity indicators
+      const lowSeverityKeywords = [
+        'minor', 'small', 'cosmetic', 'beauty', 'cleanup', 'improvement',
+        'suggestion', 'request', 'information'
+      ];
+
+      // Count keyword matches
+      const criticalMatches = criticalKeywords.filter(keyword => 
+        combinedText.includes(keyword)
+      ).length;
+      
+      const highMatches = highSeverityKeywords.filter(keyword => 
+        combinedText.includes(keyword)
+      ).length;
+
+      const lowMatches = lowSeverityKeywords.filter(keyword => 
+        combinedText.includes(keyword)
+      ).length;
+
+      // Calculate severity score (1-10 scale)
+      let baseScore = 5;
+      
+      // Adjust based on keyword matches
+      baseScore += (criticalMatches * 2.5); // Critical keywords add 2.5 points each
+      baseScore += (highMatches * 1.5);     // High severity keywords add 1.5 points each
+      baseScore -= (lowMatches * 1.0);      // Low severity keywords subtract 1 point each
+
+      // Factor in existing reports (more reports = higher severity)
+      if (existingReports && existingReports.length > 0) {
+        const existingCount = existingReports.length;
+        baseScore += Math.min(existingCount * 0.5, 2); // Max 2 points for multiple reports
+        reasoning += `Multiple similar reports (${existingCount}) indicate recurring issue. `;
+      }
+
+      // Clamp severity score between 1 and 10
+      severityScore = Math.max(1, Math.min(10, Math.round(baseScore * 10) / 10));
+      
+      // Calculate confidence based on keyword matches and content length
+      const contentLength = combinedText.length;
+      confidence = Math.min(0.95, 
+        (criticalMatches * 0.3) + 
+        (highMatches * 0.2) + 
+        Math.min(contentLength / 200, 0.3) + 
+        0.2
+      );
+
+      // Generate reasoning
+      if (criticalMatches > 0) {
+        reasoning += `Contains ${criticalMatches} critical keywords indicating emergency situation. `;
+      }
+      if (highMatches > 0) {
+        reasoning += `Contains ${highMatches} high-severity keywords indicating significant issue. `;
+      }
+      if (lowMatches > 0) {
+        reasoning += `Contains ${lowMatches} low-severity keywords suggesting minor issue. `;
+      }
+      
+      if (reasoning === '') {
+        reasoning = 'Standard severity based on content analysis';
+      }
+
+      const analysis = {
+        severity: severityScore,
+        confidence: Math.round(confidence * 100) / 100,
+        reasoning: reasoning.trim(),
+        keywordMatches: {
+          critical: criticalMatches,
+          high: highMatches,
+          low: lowMatches
+        },
+        existingReportsCount: existingReports ? existingReports.length : 0,
+        contentLength,
+        severityLevel: severityScore >= 8 ? 'CRITICAL' : 
+                      severityScore >= 6 ? 'HIGH' : 
+                      severityScore >= 4 ? 'MEDIUM' : 'LOW'
+      };
+
+      console.log('✅ AI: Duplicate severity analysis complete:', analysis);
+      return analysis;
+
+    } catch (error) {
+      console.error('❌ AI: Error analyzing duplicate severity:', error);
+      return {
+        severity: 5,
+        confidence: 0.5,
+        reasoning: 'Default severity due to analysis error',
+        keywordMatches: { critical: 0, high: 0, low: 0 },
+        existingReportsCount: 0,
+        contentLength: 0,
+        severityLevel: 'MEDIUM'
+      };
     }
   }
 }

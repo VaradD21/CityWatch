@@ -6,7 +6,6 @@ import { API_ENDPOINTS } from '../config/api';
 import LazyImage from '../components/LazyImage';
 import CityMap from '../components/CityMap';
 import Button from '../components/ui/Button';
-import PriorityBadge from '../components/PriorityBadge';
 import {
   FileText,
   AlertTriangle,
@@ -19,12 +18,11 @@ import {
   Eye,
   MessageSquare,
   MapPin,
-  LogOut,
   Shield
 } from 'lucide-react';
 
 const AuthorityDashboard = () => {
-  const { user, logout, makeAuthenticatedRequest } = useAuth();
+  const { user, makeAuthenticatedRequest } = useAuth();
   const { success: showSuccess, error: showError } = useToast();
   
   // Data states
@@ -41,10 +39,6 @@ const AuthorityDashboard = () => {
     activeAlerts: 0
   });
   const [loading, setLoading] = useState(true);
-
-  const handleLogout = () => {
-    logout();
-  };
 
   // Fetch dashboard data
   const fetchDashboardData = async () => {
@@ -150,14 +144,6 @@ const AuthorityDashboard = () => {
                 <Calendar className="w-4 h-4 mr-2" />
                 Manage Events
               </Link>
-              <Button
-                onClick={handleLogout}
-                variant="secondary"
-                size="sm"
-                leftIcon={<LogOut className="w-4 h-4" />}
-              >
-                Logout
-              </Button>
             </div>
           </div>
         </div>
@@ -268,13 +254,8 @@ const AuthorityDashboard = () => {
                       <div className="p-2 bg-primary-100 rounded-lg">
                         <FileText className="w-5 h-5 text-primary-600" />
                       </div>
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <h3 className="font-medium text-gray-900">{report.title}</h3>
-                          {report.priorityCount > 0 && (
-                            <PriorityBadge priorityCount={report.priorityCount} size="sm" />
-                          )}
-                        </div>
+                      <div>
+                        <h3 className="font-medium text-gray-900">{report.title}</h3>
                         <p className="text-sm text-gray-500">{report.category}</p>
                       </div>
                     </div>

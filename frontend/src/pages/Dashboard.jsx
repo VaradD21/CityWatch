@@ -1,16 +1,20 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import { useNotifications } from '../contexts/NotificationContext';
 import { Link } from 'react-router-dom';
 import LazyImage from '../components/LazyImage';
-import CityMap from '../components/CityMap';
+import EnhancedCityMap from '../components/EnhancedCityMap';
+import CityChangeRequest from '../components/CityChangeRequest';
 import Button from '../components/ui/Button';
+import ReportCard from '../components/ReportCard';
 import { API_ENDPOINTS } from '../config/api';
-import { Plus, LogOut } from 'lucide-react';
+import { Plus } from 'lucide-react';
 
 const Dashboard = () => {
-  const { user, logout, makeAuthenticatedRequest, loading: authLoading } = useAuth();
+  const { user, makeAuthenticatedRequest, loading: authLoading } = useAuth();
   const { success, error: showError } = useToast();
+  const { notifications, unreadCount, loading: notificationLoading } = useNotifications();
   
   // Data states
   const [announcements, setAnnouncements] = useState([]);
@@ -18,21 +22,14 @@ const Dashboard = () => {
   const [trendingReports, setTrendingReports] = useState([]);
   const [dataLoading, setDataLoading] = useState(true);
 
-  const handleLogout = () => {
-    logout();
-  };
-
   // Fetch dashboard data
   const fetchDashboardData = async () => {
     if (!user) return;
 
     try {
       setDataLoading(true);
-      console.log('📊 Fetching dashboard data for user:', user.username, 'City ID:', user.cityId);
-
       // Check if user has a city assigned
       if (!user.cityId) {
-        console.log('⚠️ User has no city assigned');
         setAnnouncements([]);
         setAlerts([]);
         setTrendingReports([]);
@@ -44,10 +41,7 @@ const Dashboard = () => {
         const announcementsResponse = await makeAuthenticatedRequest(`${API_ENDPOINTS.EVENTS}?limit=5`);
         if (announcementsResponse.ok) {
           const announcementsData = await announcementsResponse.json();
-          console.log('📅 Fetched events:', announcementsData.events?.length || 0);
           setAnnouncements(announcementsData.events || []);
-        } else {
-          console.log('❌ Failed to fetch events:', announcementsResponse.status);
         }
       } catch (error) {
         console.error('Error fetching events:', error);
@@ -58,10 +52,7 @@ const Dashboard = () => {
         const alertsResponse = await makeAuthenticatedRequest(`${API_ENDPOINTS.ALERTS}?limit=5`);
         if (alertsResponse.ok) {
           const alertsData = await alertsResponse.json();
-          console.log('🚨 Fetched alerts:', alertsData.alerts?.length || 0);
           setAlerts(alertsData.alerts || []);
-        } else {
-          console.log('❌ Failed to fetch alerts:', alertsResponse.status);
         }
       } catch (error) {
         console.error('Error fetching alerts:', error);
@@ -72,12 +63,9 @@ const Dashboard = () => {
         const reportsResponse = await makeAuthenticatedRequest(`${API_ENDPOINTS.REPORTS}?limit=10`);
         if (reportsResponse.ok) {
           const reportsData = await reportsResponse.json();
-          console.log('📝 Fetched reports:', reportsData.reports?.length || 0);
           // Sort by comment count (trending)
           const sortedReports = (reportsData.reports || []).sort((a, b) => (b.comments?.length || 0) - (a.comments?.length || 0));
           setTrendingReports(sortedReports.slice(0, 7));
-        } else {
-          console.log('❌ Failed to fetch reports:', reportsResponse.status);
         }
       } catch (error) {
         console.error('Error fetching reports:', error);
@@ -97,6 +85,23 @@ const Dashboard = () => {
       fetchDashboardData();
     }
   }, [user]);
+
+
+  const handleVote = (reportId, voteData) => {
+    // Update the trending reports with new voting data
+    setTrendingReports(prevReports => 
+      prevReports.map(report => 
+        report.id === reportId 
+          ? { 
+              ...report, 
+              severity: voteData.averageSeverity,
+              voteCount: voteData.voteCount,
+              priority: voteData.priority
+            }
+          : report
+      )
+    );
+  };
 
   const getRoleColor = (role) => {
     switch (role) {
@@ -165,9 +170,12 @@ const Dashboard = () => {
             <div className="flex items-center space-x-4">
               {user.profilePictureUrl ? (
                 <LazyImage
-                  src={user.profilePictureUrl}
+                  src={`http://localhost:5000${user.profilePictureUrl}`}
                   alt={user.username}
                   className="w-10 h-10 rounded-full object-cover"
+                  onError={() => {
+                    console.log('Profile picture failed to load in Dashboard:', user.profilePictureUrl);
+                  }}
                 />
               ) : (
                 <div className="w-10 h-10 rounded-full bg-gray-300 flex items-center justify-center">
@@ -195,14 +203,6 @@ const Dashboard = () => {
                   Create Report
                 </Button>
               </Link>
-              <Button
-                onClick={handleLogout}
-                variant="secondary"
-                size="sm"
-                leftIcon={<LogOut className="w-4 h-4" />}
-              >
-                Logout
-              </Button>
             </div>
           </div>
         </div>
@@ -229,6 +229,7 @@ const Dashboard = () => {
             </div>
           </div>
         )}
+
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           
@@ -351,41 +352,22 @@ const Dashboard = () => {
                   <p className="mt-1 text-sm text-gray-500">Be the first to create a report!</p>
                 </div>
               ) : (
-                <div className="space-y-4">
+                <div className="grid gap-4">
                   {trendingReports.map((report) => (
-                    <div key={report.id} className="border-b border-gray-200 pb-4 last:border-b-0">
-                      <div className="flex items-start space-x-3">
-                        <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center flex-shrink-0">
-                          <span className="text-xs font-medium text-gray-600">
-                            {report.author?.username?.charAt(0).toUpperCase() || 'U'}
-                          </span>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center space-x-2 mb-1">
-                            <h3 className="text-sm font-medium text-gray-900 line-clamp-1">
-                              {report.title}
-                            </h3>
-                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(report.status)}`}>
-                              {report.status}
-                            </span>
-                          </div>
-                          <p className="text-sm text-gray-600 line-clamp-2 mb-2">
-                            {report.description}
-                          </p>
-                          <div className="flex items-center space-x-3 text-xs text-gray-500">
-                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getCategoryColor(report.category)}`}>
-                              {report.category}
-                            </span>
-                            <span>{formatDate(report.createdAt)}</span>
-                            <span>{report.comments?.length || 0} comments</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
+                    <ReportCard 
+                      key={report.id}
+                      report={report}
+                      onVote={handleVote}
+                    />
                   ))}
                 </div>
               )}
             </div>
+          </div>
+
+          {/* City Change Request Section */}
+          <div className="lg:col-span-1">
+            <CityChangeRequest />
           </div>
         </div>
 
@@ -393,7 +375,7 @@ const Dashboard = () => {
         <div className="mt-8">
           <div className="bg-white rounded-lg p-4 shadow-sm">
             <h2 className="text-lg font-semibold text-gray-900 mb-4">City Map</h2>
-            <CityMap height="450px" showNearbyToggle={true} />
+            <EnhancedCityMap height="500px" showFilters={true} />
           </div>
         </div>
       </div>

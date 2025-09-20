@@ -3,9 +3,18 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { API_ENDPOINTS } from '../config/api';
 import Button from '../components/ui/Button';
-import PriorityButton from '../components/PriorityButton';
-import PriorityBadge from '../components/PriorityBadge';
 import { ArrowLeft } from 'lucide-react';
+import { MapContainer, TileLayer, Marker, Popup } from 'react-leaflet';
+import L from 'leaflet';
+import 'leaflet/dist/leaflet.css';
+
+// Fix for default markers in react-leaflet
+delete L.Icon.Default.prototype._getIconUrl;
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+});
 
 const ReportDetail = () => {
   const { id } = useParams();
@@ -24,14 +33,12 @@ const ReportDetail = () => {
   const [newComment, setNewComment] = useState('');
   const [addingComment, setAddingComment] = useState(false);
   const [activeTab, setActiveTab] = useState('details'); // 'details' or 'timeline'
-
-  const handlePriorityVoteChange = (hasVoted, newCount) => {
-    setReport(prevReport => ({
-      ...prevReport,
-      priorityCount: newCount,
-      userHasVoted: hasVoted
-    }));
-  };
+  const [verification, setVerification] = useState({
+    verified: null,
+    comment: ''
+  });
+  const [verifying, setVerifying] = useState(false);
+  const [verificationStats, setVerificationStats] = useState(null);
 
   useEffect(() => {
     const fetchReport = async () => {
@@ -62,7 +69,8 @@ const ReportDetail = () => {
 
     fetchReport();
     fetchTimeline();
-  }, [id, makeAuthenticatedRequest, user]);
+    fetchVerificationStats();
+}, [id, makeAuthenticatedRequest, user]);
 
   const handleImageChange = (e) => {
     const files = Array.from(e.target.files);
@@ -132,6 +140,57 @@ const ReportDetail = () => {
       setError('Failed to close report');
     } finally {
       setUpdating(false);
+    }
+  };
+
+  const handleVerification = async (e) => {
+    e.preventDefault();
+    if (verification.verified === null) return;
+
+    setVerifying(true);
+    try {
+      const response = await makeAuthenticatedRequest(API_ENDPOINTS.REPORTS_VERIFY(id), {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          verified: verification.verified,
+          comment: verification.comment
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setVerification({ verified: null, comment: '' });
+        // Refresh verification stats
+        fetchVerificationStats();
+      } else {
+        const errorData = await response.json();
+        setError(errorData.error);
+      }
+    } catch (err) {
+      setError('Failed to submit verification');
+    } finally {
+      setVerifying(false);
+    }
+  };
+
+  const fetchVerificationStats = async () => {
+    try {
+      const response = await makeAuthenticatedRequest(API_ENDPOINTS.REPORTS_VERIFICATION(id));
+      if (response.ok) {
+        const data = await response.json();
+        setVerificationStats(data.data.stats);
+        if (data.data.userVerification) {
+          setVerification({
+            verified: data.data.userVerification.verified,
+            comment: data.data.userVerification.comment || ''
+          });
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch verification stats:', err);
     }
   };
 
@@ -424,21 +483,7 @@ const ReportDetail = () => {
             >
               ← Back to Dashboard
             </button>
-            <div className="flex items-start justify-between mb-2">
-              <h1 className="text-3xl font-bold text-gray-900 flex-1">{report.title}</h1>
-              <div className="flex items-center gap-3 ml-4">
-                {report.priorityCount > 0 && (
-                  <PriorityBadge priorityCount={report.priorityCount} size="md" />
-                )}
-                <PriorityButton
-                  reportId={report.id}
-                  priorityCount={report.priorityCount || 0}
-                  userHasVoted={report.userHasVoted || false}
-                  onVoteChange={handlePriorityVoteChange}
-                  size="md"
-                />
-              </div>
-            </div>
+            <h1 className="text-3xl font-bold text-gray-900 mb-2">{report.title}</h1>
             <div className="flex items-center space-x-4 text-sm text-gray-600">
               <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${getStatusColor(report.status)}`}>
                 {report.status.replace('_', ' ')}
@@ -489,6 +534,62 @@ const ReportDetail = () => {
                     <div className="prose max-w-none">
                       <p className="text-gray-700 whitespace-pre-wrap">{report.description}</p>
                     </div>
+                  </div>
+
+                  {/* Report Location Map */}
+                  <div className="bg-white rounded-lg shadow-md p-6">
+                    <h2 className="text-xl font-semibold text-gray-900 mb-4">Report Location</h2>
+                    <div className="mb-4 p-3 bg-blue-50 border border-blue-200 rounded-md">
+                      <div className="flex items-center">
+                        <svg className="w-5 h-5 text-blue-600 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                          <path fillRule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clipRule="evenodd" />
+                        </svg>
+                        <div>
+                          <p className="text-sm font-medium text-blue-900">Exact Location</p>
+                          <p className="text-xs text-blue-700">
+                            <span className="font-medium">{report.city?.name}</span> - 
+                            Latitude: {report.latitude?.toFixed(6)}, Longitude: {report.longitude?.toFixed(6)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    {report.latitude && report.longitude ? (
+                      <div className="h-64 rounded-lg overflow-hidden border border-gray-200">
+                        <MapContainer
+                          center={[report.latitude, report.longitude]}
+                          zoom={16}
+                          style={{ height: '100%', width: '100%' }}
+                        >
+                          <TileLayer
+                            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                          />
+                          <Marker position={[report.latitude, report.longitude]}>
+                            <Popup>
+                              <div className="text-center">
+                                <h3 className="font-semibold text-gray-900 mb-2">{report.title}</h3>
+                                <p className="text-sm text-gray-600 mb-1">{report.category}</p>
+                                <p className="text-xs text-blue-600 font-medium mb-2">{report.city?.name}</p>
+                                <p className="text-xs text-gray-500">
+                                  {report.latitude.toFixed(6)}, {report.longitude.toFixed(6)}
+                                </p>
+                              </div>
+                            </Popup>
+                          </Marker>
+                        </MapContainer>
+                      </div>
+                    ) : (
+                      <div className="h-64 bg-gray-100 rounded-lg flex items-center justify-center">
+                        <div className="text-center">
+                          <svg className="w-12 h-12 text-gray-400 mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                          </svg>
+                          <p className="text-gray-500">No location data available</p>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
               {/* Authority Updates */}
@@ -550,6 +651,101 @@ const ReportDetail = () => {
                 </div>
               )}
 
+              {/* Report Verification (for resolved reports) */}
+              {report.status === 'RESOLVED' && (
+                <div className="bg-white rounded-lg shadow-md p-6">
+                  <h2 className="text-xl font-semibold text-gray-900 mb-4">Report Verification</h2>
+                  <p className="text-gray-600 mb-4">
+                    Help verify if this issue has been properly resolved by reviewing the authority's work and resolution images.
+                  </p>
+                  
+                  {/* Verification Form (Citizens only) */}
+                  {user && user.role === 'citizen' && (
+                    <div className="border-t pt-4">
+                      <h3 className="text-lg font-medium text-gray-900 mb-3">Your Verification</h3>
+                      <form onSubmit={handleVerification} className="space-y-4">
+                        <div>
+                          <label className="block text-sm font-medium text-gray-700 mb-2">
+                            Has this issue been properly resolved? *
+                          </label>
+                          <div className="space-y-2">
+                            <label className="flex items-center">
+                              <input
+                                type="radio"
+                                name="verified"
+                                value="true"
+                                checked={verification.verified === true}
+                                onChange={(e) => setVerification({...verification, verified: e.target.value === 'true'})}
+                                className="mr-2"
+                              />
+                              <span className="text-green-700">✅ Yes, the issue has been resolved</span>
+                            </label>
+                            <label className="flex items-center">
+                              <input
+                                type="radio"
+                                name="verified"
+                                value="false"
+                                checked={verification.verified === false}
+                                onChange={(e) => setVerification({...verification, verified: e.target.value === 'false'})}
+                                className="mr-2"
+                              />
+                              <span className="text-red-700">❌ No, the issue is not resolved</span>
+                            </label>
+                          </div>
+                        </div>
+                        
+                        <div>
+                          <label htmlFor="comment" className="block text-sm font-medium text-gray-700 mb-2">
+                            Additional Comments (Optional)
+                          </label>
+                          <textarea
+                            id="comment"
+                            value={verification.comment}
+                            onChange={(e) => setVerification({...verification, comment: e.target.value})}
+                            rows={3}
+                            className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                            placeholder="Share any additional observations about the resolution..."
+                          />
+                        </div>
+                        
+                        <Button
+                          type="submit"
+                          loading={verifying}
+                          disabled={verification.verified === null}
+                        >
+                          {verifying ? 'Submitting...' : 'Submit Verification'}
+                        </Button>
+                      </form>
+                    </div>
+                  )}
+                  
+                  {/* Verification Stats */}
+                  {verificationStats && (
+                    <div className="border-t pt-4 mt-4">
+                      <h3 className="text-lg font-medium text-gray-900 mb-3">Community Verification</h3>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-blue-600">{verificationStats.total}</div>
+                          <div className="text-sm text-gray-600">Total Verifications</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-green-600">{verificationStats.verified}</div>
+                          <div className="text-sm text-gray-600">Verified</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-red-600">{verificationStats.notVerified}</div>
+                          <div className="text-sm text-gray-600">Not Verified</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-2xl font-bold text-purple-600">{Math.round(verificationStats.verificationRate)}%</div>
+                          <div className="text-sm text-gray-600">Verification Rate</div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Authority Update Form */}
               {canAddAuthorityUpdate && (
                 <div className="bg-white rounded-lg shadow-md p-6">
@@ -592,7 +788,7 @@ const ReportDetail = () => {
                     {/* Resolution Images Upload */}
                     <div>
                       <label htmlFor="resolutionImages" className="block text-sm font-medium text-gray-700 mb-2">
-                        Resolution Images (Optional)
+                        Resolution Images {authorityUpdate.newStatus === 'RESOLVED' ? '*' : '(Optional)'}
                       </label>
                       <input
                         type="file"
@@ -604,6 +800,9 @@ const ReportDetail = () => {
                       />
                       <p className="text-xs text-gray-500 mt-1">
                         Upload images or PDFs to show proof of resolution. Max 5 files, 5MB each.
+                        {authorityUpdate.newStatus === 'RESOLVED' && (
+                          <span className="text-red-600 font-medium"> Required when resolving reports.</span>
+                        )}
                       </p>
                       
                       {/* Show selected files */}
@@ -630,7 +829,7 @@ const ReportDetail = () => {
                     <Button
                       type="submit"
                       loading={updating}
-                      disabled={!authorityUpdate.text.trim()}
+                      disabled={!authorityUpdate.text.trim() || (authorityUpdate.newStatus === 'RESOLVED' && resolutionImages.length === 0)}
                     >
                       {updating ? 'Adding Update...' : 'Add Update'}
                     </Button>
@@ -681,7 +880,7 @@ const ReportDetail = () => {
                           <div>
                             <div className="relative">
                               <img
-                                src={attachment.url}
+                                src={`http://localhost:5000${attachment.url}`}
                                 alt={attachment.filename}
                                 className="w-full h-32 object-cover rounded-md mb-2"
                                 onError={(e) => {
@@ -714,7 +913,7 @@ const ReportDetail = () => {
                               </svg>
                             </div>
                             <a
-                              href={attachment.url}
+                              href={`http://localhost:5000${attachment.url}`}
                               download={attachment.filename}
                               className="text-sm font-medium text-blue-600 hover:text-blue-800 truncate block"
                             >

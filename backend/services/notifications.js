@@ -46,23 +46,16 @@ const createNotificationsForUsers = async (
   alertId = null
 ) => {
   try {
-    // Batch create notifications instead of individual queries
-    const notificationData = userIds.map(userId => ({
-      userId,
-      type,
-      message,
-      reportId,
-      alertId
-    }));
-
-    const result = await prisma.notification.createMany({
-      data: notificationData
-    });
+    const notifications = await Promise.all(
+      userIds.map((userId) =>
+        createNotification(userId, type, message, reportId, alertId)
+      )
+    );
 
     console.log(
       `Notifications created for ${userIds.length} users: ${type} - ${message}`
     );
-    return result;
+    return notifications;
   } catch (error) {
     console.error('Error creating notifications for users:', error);
     throw error;

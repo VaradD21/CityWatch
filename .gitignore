@@ -65,6 +65,3 @@ prisma/migrations/
 backend/assets/profiles/
 backend/assets/reports/
 # Keep backend/assets/icons/ for system icons like bell.png
-
-# Mobile app - exclude from version control
-mobile/
